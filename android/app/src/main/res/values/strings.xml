@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RB64 Live</string>
+    <string name="widget_name">RB64</string>
+    <string name="widget_description">Nächste Züge deiner Strecke mit Verspätung und Grund</string>
+    <string name="widget_small_name">RB64 klein</string>
+    <string name="widget_small_description">RB64: nur der nächste Zug (2×1)</string>
+</resources>

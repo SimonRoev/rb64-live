@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#131A23</color>
+
+    <!-- Rollen wie in der App (Regeln v2), hell; dunkel in values-night -->
+    <color name="widget_bg">#F2F4F7</color>
+    <color name="widget_card">#FFFFFF</color>
+    <color name="widget_header">#0B5563</color>
+    <color name="widget_on_header">#FFFFFF</color>
+    <color name="widget_text">#111827</color>
+    <color name="widget_muted">#4B5563</color>
+    <color name="widget_line">#E2E6EB</color>
+    <color name="widget_primary">#0B5563</color>
+    <color name="widget_neutral_bg">#E2E6EB</color>
+
+    <color name="status_ok">#166534</color>
+    <color name="status_ok_bg">#DCFCE7</color>
+    <color name="status_warn">#92400E</color>
+    <color name="status_warn_bg">#FEF3C7</color>
+    <color name="status_bad">#B91C1C</color>
+    <color name="status_bad_bg">#FEE2E2</color>
+</resources>

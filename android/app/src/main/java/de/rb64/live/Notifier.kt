@@ -1,0 +1,269 @@
+package de.rb64.live
+
+import android.Manifest
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import java.util.Calendar
+
+/** Zeitfenster in Minuten seit Mitternacht. */
+data class Window(val from: Int, val to: Int) {
+    fun contains(min: Int) = min in from..to
+    override fun toString() = "%02d:%02d–%02d:%02d".format(from / 60, from % 60, to / 60, to % 60)
+    fun encode() = "$from-$to"
+
+    companion object {
+        fun decode(s: String?): Window? = s?.split("-")?.takeIf { it.size == 2 }
+            ?.let { runCatching { Window(it[0].toInt(), it[1].toInt()) }.getOrNull() }
+    }
+}
+
+/** Standard-Zeitfenster: Hinrichtung morgens, Rueckrichtung nachmittags. */
+val WINDOW_HIN = Window(6 * 60, 9 * 60 + 30)
+val WINDOW_BACK = Window(14 * 60, 18 * 60)
+
+/** Fruehere feste Strecken-IDs -> neue IDs "von-nach" (seq), damit Einstellungen erhalten bleiben. */
+private val OLD_IDS = mapOf("haeger_hbf" to "3-1", "hbf_haeger" to "1-3", "haeger_bst" to "3-8", "bst_haeger" to "8-3")
+
+/** Einstellungen fuer Benachrichtigungen (lokal auf dem Handy). */
+data class Settings(
+    val enabled: Boolean = false,
+    val vibrate: Boolean = false,
+    val threshold: Int = 5,          // ab +X min
+    val onlyCancel: Boolean = false,
+    val leadMin: Int = 30,           // nur fuer Abfahrten in den naechsten X min
+    val weekdaysOnly: Boolean = true,
+    val rels: Set<String> = setOf("3-8", "8-3"),
+    val windows: Map<String, Window> = emptyMap(),     // je Richtung "von-nach"
+) {
+    companion object {
+        fun load(ctx: Context): Settings {
+            val p = Repo.prefs(ctx)
+            val d = Settings()
+            val favs = Repo.favs(ctx)
+            fun stored(id: String) = Window.decode(p.getString("n_win_$id", null))
+                ?: OLD_IDS.entries.firstOrNull { it.value == id }?.let { Window.decode(p.getString("n_win_${it.key}", null)) }
+            return Settings(
+                enabled = p.getBoolean("n_enabled", d.enabled),
+                vibrate = p.getBoolean("n_vibrate", d.vibrate),
+                threshold = p.getInt("n_threshold", d.threshold),
+                onlyCancel = p.getBoolean("n_only_cancel", d.onlyCancel),
+                leadMin = p.getInt("n_lead", d.leadMin),
+                weekdaysOnly = p.getBoolean("n_weekdays", d.weekdaysOnly),
+                rels = (p.getStringSet("n_rels", d.rels) ?: d.rels).map { OLD_IDS[it] ?: it }.toSet(),
+                windows = favs.flatMap { f -> listOf(f.hinId to (stored(f.hinId) ?: WINDOW_HIN), f.backId to (stored(f.backId) ?: WINDOW_BACK)) }
+                    .toMap(),
+            )
+        }
+    }
+
+    fun save(ctx: Context) {
+        val e = Repo.prefs(ctx).edit()
+            .putBoolean("n_enabled", enabled).putBoolean("n_vibrate", vibrate)
+            .putInt("n_threshold", threshold).putBoolean("n_only_cancel", onlyCancel)
+            .putInt("n_lead", leadMin).putBoolean("n_weekdays", weekdaysOnly)
+            .putStringSet("n_rels", rels)
+        windows.forEach { (id, w) -> e.putString("n_win_$id", w.encode()) }
+        e.apply()
+    }
+}
+
+/**
+ * Erzeugt Benachrichtigungen aus den empfangenen Daten - bewusst sparsam:
+ * nur fuer eingeschaltete Strecken in ihrem Zeitfenster, kurz vor Abfahrt,
+ * eine Benachrichtigung pro Zug (wird aktualisiert statt gestapelt), mit Knopf
+ * "Zug genommen", der die Strecke fuer den Rest des Zeitfensters stumm schaltet.
+ */
+object Notifier {
+    const val CH_QUIET = "rb64_quiet"
+    const val CH_VIBRATE = "rb64_vibrate"
+    const val ACTION_MUTE = "de.rb64.live.MUTE"
+
+    const val CH_PIN = "rb64_pin"
+    const val CH_PIN_ALERT = "rb64_pin_alert"
+    const val PIN_ID = 6410
+
+    fun createChannels(ctx: Context) {
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(NotificationChannel(CH_PIN, "Dein Zug (Sperrbildschirm)", NotificationManager.IMPORTANCE_DEFAULT).apply {
+            setSound(null, null); enableVibration(false); setShowBadge(false)
+            description = "Der angeheftete Zug mit aktueller Abfahrt, still"
+        })
+        nm.createNotificationChannel(NotificationChannel(CH_PIN_ALERT, "Dein Zug: Änderungen", NotificationManager.IMPORTANCE_HIGH).apply {
+            setSound(null, null); enableVibration(true); vibrationPattern = longArrayOf(0, 200, 120, 200)
+            description = "Wenn sich die Abfahrt deines angehefteten Zugs ändert oder er ausfällt"
+        })
+        nm.createNotificationChannel(NotificationChannel(CH_QUIET, "Verspätungen (lautlos)", NotificationManager.IMPORTANCE_DEFAULT).apply {
+            setSound(null, null); enableVibration(false)
+            description = "Ausfälle und Verspätungen deiner Züge, ohne Ton und Vibration"
+        })
+        nm.createNotificationChannel(NotificationChannel(CH_VIBRATE, "Verspätungen (Vibration)", NotificationManager.IMPORTANCE_HIGH).apply {
+            setSound(null, null); enableVibration(true); vibrationPattern = longArrayOf(0, 250, 150, 250)
+            description = "Ausfälle und Verspätungen deiner Züge, mit Vibration"
+        })
+    }
+
+    fun permitted(ctx: Context) =
+        ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    private fun today(): String = Calendar.getInstance().let { "${it.get(Calendar.YEAR)}-${it.get(Calendar.DAY_OF_YEAR)}" }
+
+    fun isMuted(ctx: Context, relId: String) = Repo.prefs(ctx).getString("mute_$relId", null) == today()
+
+    fun mute(ctx: Context, relId: String) {
+        Repo.prefs(ctx).edit().putString("mute_$relId", today()).apply()
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.activeNotifications.filter { it.notification.group == relId }.forEach { nm.cancel(it.id) }
+    }
+
+    /** Alle Zug-Benachrichtigungen entfernen (z. B. beim Start einer Fahrt). Sie tragen die Strecke als Gruppe. */
+    fun cancelTrainNotifications(ctx: Context) {
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.activeNotifications.filter { it.notification.group != null }.forEach { nm.cancel(it.id) }
+    }
+
+    fun unmute(ctx: Context, relId: String) = Repo.prefs(ctx).edit().remove("mute_$relId").apply()
+
+    private fun minutesOf(hm: String): Int? = hm.split(":").takeIf { it.size == 2 }
+        ?.let { runCatching { it[0].toInt() * 60 + it[1].toInt() }.getOrNull() }
+
+    /** "Dein Zug": still auf dem Sperrbildschirm, mit Vibration bei Aenderung ab X min oder Ausfall.
+     *  Waehrend einer Aufzeichnung dieses Zugs uebernimmt das Live Update. */
+    fun onPinned(ctx: Context, snap: Snapshot?) {
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        val p = Repo.prefs(ctx)
+        val train = Repo.pinnedTrain(ctx)
+        de.rb64.live.ride.RideStore.init(ctx)
+        val riding = de.rb64.live.ride.RideStore.state.value?.info?.train == train
+        if (train == null || snap == null || riding || !permitted(ctx)) { nm.cancel(PIN_ID); return }
+        val rel = Repo.pinnedRelId(ctx)?.let { Repo.relById(snap, it) } ?: Repo.currentRel(ctx, snap) ?: run { nm.cancel(PIN_ID); return }
+        val r = rel.rows.firstOrNull { it.train == train } ?: run { nm.cancel(PIN_ID); return }
+        val now = System.currentTimeMillis()
+
+        // Aenderung gegenueber der letzten Meldung (erste Anzeige ist nur der Ausgangswert)
+        val key = if (r.cancelled) -999 else r.depDelay
+        val last = p.getInt("pin_last_delay", Int.MIN_VALUE)
+        val changed = last != Int.MIN_VALUE && (key == -999 && last != -999 ||
+            key != -999 && last != -999 && kotlin.math.abs(key - last) >= Repo.pinThreshold(ctx))
+        if (last == Int.MIN_VALUE || changed) p.edit().putInt("pin_last_delay", key).apply()
+        val alert = changed && Repo.pinNotify(ctx)
+        if (!Repo.pinLock(ctx) && !alert) { nm.cancel(PIN_ID); return }
+
+        val departed = r.depEpoch < now - 60_000
+        val title = when {
+            r.cancelled -> "Dein Zug ${r.depPlanned} fällt aus"
+            departed -> "Dein Zug ist unterwegs · an ${r.arrExpected}"
+            r.depDelay >= 1 -> "Dein Zug ${r.depExpected} (+${r.depDelay}) → ${rel.to}"
+            else -> "Dein Zug ${r.depExpected} → ${rel.to} · pünktlich"
+        }
+        val text = listOfNotNull(
+            if (!r.cancelled && r.depDelay >= 1 && !departed) "Plan ${r.depPlanned}" else null,
+            r.platform?.let { "Gleis $it" },
+            if (!r.cancelled && !departed) "an ${r.arrExpected}" else null,
+            r.reason?.takeIf { !r.cancelled }?.replaceFirstChar { it.uppercase() },
+        ).joinToString(" · ")
+        val open = PendingIntent.getActivity(ctx, 9, Intent(ctx, MainActivity::class.java)
+            .putExtra("train", r.train).putExtra("dep", r.depPlanned)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = Notification.Builder(ctx, if (alert) CH_PIN_ALERT else CH_PIN)
+            .setSmallIcon(R.drawable.ic_notify)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setOngoing(Repo.pinLock(ctx))
+            .setOnlyAlertOnce(!alert)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setCategory(Notification.CATEGORY_TRANSPORT)
+            .setContentIntent(open)
+            .setTimeoutAfter(maxOf(60_000L, r.arrEpoch - now + 30 * 60_000L))
+            .build()
+        nm.notify(PIN_ID, n)
+    }
+
+    fun onPayload(ctx: Context, snap: Snapshot) {
+        val s = Settings.load(ctx)
+        if (!s.enabled || !permitted(ctx)) return
+        // waehrend einer Fahrtaufzeichnung sitzt man schon im Zug -> keine Meldungen zu anderen Zuegen
+        de.rb64.live.ride.RideStore.init(ctx)
+        if (de.rb64.live.ride.RideStore.state.value != null) return
+        val cal = Calendar.getInstance()
+        val dow = cal.get(Calendar.DAY_OF_WEEK)
+        if (s.weekdaysOnly && (dow == Calendar.SATURDAY || dow == Calendar.SUNDAY)) return
+
+        val state = ctx.getSharedPreferences("rb64_notify", Context.MODE_PRIVATE)
+        if (state.getString("day", null) != today()) state.edit().clear().putString("day", today()).apply()
+
+        val now = System.currentTimeMillis()
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        val rels = Repo.directedRels(ctx).map { it.first }.filter { it in s.rels && !isMuted(ctx, it) }
+            .mapNotNull { Repo.relById(snap, it) }
+        for (rel in rels) {
+            val win = s.windows[rel.id] ?: continue
+            for (r in rel.rows) {
+                if (r.past || r.bus || r.depEpoch == 0L) continue
+                val planMin = minutesOf(r.depPlanned) ?: continue
+                if (!win.contains(planMin)) continue                      // nur Zuege im Zeitfenster
+                val minsAhead = (r.depEpoch - now) / 60_000
+                if (minsAhead < 0 || minsAhead > s.leadMin) continue      // nur kurz vor Abfahrt
+                val st = when {
+                    r.cancelled -> "x"
+                    s.onlyCancel -> "0"
+                    r.depDelay >= s.threshold -> "d" + (r.depDelay / 5) * 5
+                    else -> "0"
+                }
+                val key = "${rel.id}:${r.train}:${r.depPlanned}"
+                val old = state.getString(key, null)
+                state.edit().putString(key, st).apply()
+                val notify = if (old == null) st != "0" else (old != st && (st != "0" || old != "0"))
+                if (!notify) continue
+
+                val (title, text) = message(rel, r, st)
+                val muteIntent = PendingIntent.getBroadcast(
+                    ctx, rel.id.hashCode(), Intent(ctx, MuteReceiver::class.java).setAction(ACTION_MUTE).putExtra("rel", rel.id),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                )
+                val n = Notification.Builder(ctx, if (s.vibrate) CH_VIBRATE else CH_QUIET)
+                    .setSmallIcon(R.drawable.ic_notify)
+                    .setContentTitle(title)
+                    .setContentText(text)
+                    .setStyle(Notification.BigTextStyle().bigText(text))
+                    .setGroup(rel.id)
+                    .setAutoCancel(true)
+                    .setTimeoutAfter(maxOf(60_000L, r.depEpoch - now + 10 * 60_000L))   // verschwindet nach Abfahrt
+                    .setContentIntent(PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java),
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+                    .addAction(Notification.Action.Builder(null, "Zug genommen · Rest stumm", muteIntent).build())
+                    .build()
+                nm.notify(key.hashCode(), n)
+            }
+        }
+    }
+
+    private fun message(rel: Rel, r: Row, st: String): Pair<String, String> {
+        val head = "${r.depPlanned} ${rel.from} → ${rel.to}"
+        return when {
+            st == "x" -> {
+                val alt = rel.rows.firstOrNull { !it.past && !it.cancelled && it.depEpoch > r.depEpoch }
+                "$head fällt aus" to (alt?.let { "Nächste Möglichkeit: ${if (it.bus) "Ersatzbus" else "Zug"} ${it.depExpected}" +
+                        if (!it.bus && it.depDelay > 0) " (+${it.depDelay})" else "" } ?: "Keine Alternative in den Daten.")
+            }
+            st == "0" -> "$head wieder pünktlich" to "Abfahrt ${r.depExpected}."
+            else -> "$head: +${r.depDelay} min" to
+                    ("Abfahrt ca. ${r.depExpected}, Ankunft ca. ${r.arrExpected}." +
+                            (r.reason?.let { "\n" + it.replaceFirstChar { c -> c.uppercase() } } ?: ""))
+        }
+    }
+}
+
+/** Knopf "Zug genommen" in der Benachrichtigung: Strecke fuer heute stumm schalten. */
+class MuteReceiver : BroadcastReceiver() {
+    override fun onReceive(ctx: Context, intent: Intent) {
+        if (intent.action == Notifier.ACTION_MUTE) intent.getStringExtra("rel")?.let { Notifier.mute(ctx, it) }
+    }
+}
