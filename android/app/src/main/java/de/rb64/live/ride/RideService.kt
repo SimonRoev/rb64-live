@@ -131,6 +131,9 @@ class RideService : Service() {
         }
         RideStore.update(this) { correctTrain(this, it) }
         val done = RideStore.finish(this)
+        // angehefteter Zug ist mit dieser Fahrt erledigt (auch wenn der Zug korrigiert wurde: beide pruefen)
+        cur?.info?.train?.let { de.rb64.live.Notifier.onRideFinished(this, it) }
+        done?.info?.train?.let { de.rb64.live.Notifier.onRideFinished(this, it) }
         if (done != null) {
             Cloud.uploadRide(this, done)
             val nm = getSystemService(NotificationManager::class.java)

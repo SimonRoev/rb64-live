@@ -152,6 +152,12 @@ object Notifier {
 
     /** "Dein Zug": still auf dem Sperrbildschirm, mit Vibration bei Aenderung ab X min oder Ausfall.
      *  Waehrend einer Aufzeichnung dieses Zugs uebernimmt das Live Update. */
+    /** Fahrt mit dem angehefteten Zug ist zu Ende: Zug loslassen und Meldung entfernen. */
+    fun onRideFinished(ctx: Context, train: String) {
+        if (Repo.pinnedTrain(ctx) == train) Repo.unpin(ctx)
+        ctx.getSystemService(NotificationManager::class.java).cancel(PIN_ID)
+    }
+
     fun onPinned(ctx: Context, snap: Snapshot?) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         val p = Repo.prefs(ctx)
@@ -162,6 +168,8 @@ object Notifier {
         val rel = Repo.pinnedRelId(ctx)?.let { Repo.relById(snap, it) } ?: Repo.currentRel(ctx, snap) ?: run { nm.cancel(PIN_ID); return }
         val r = rel.rows.firstOrNull { it.train == train } ?: run { nm.cancel(PIN_ID); return }
         val now = System.currentTimeMillis()
+        // am Ziel angekommen (laut Daten) -> Zug loslassen, Meldung weg
+        if (!r.cancelled && r.arrEpoch > 0 && now > r.arrEpoch + 2 * 60_000L) { Repo.unpin(ctx); nm.cancel(PIN_ID); return }
 
         // Aenderung gegenueber der letzten Meldung (erste Anzeige ist nur der Ausgangswert)
         val key = if (r.cancelled) -999 else r.depDelay
@@ -199,7 +207,7 @@ object Notifier {
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setCategory(Notification.CATEGORY_TRANSPORT)
             .setContentIntent(open)
-            .setTimeoutAfter(maxOf(60_000L, r.arrEpoch - now + 30 * 60_000L))
+            .setTimeoutAfter(maxOf(60_000L, r.arrEpoch - now + 5 * 60_000L))
             .build()
         nm.notify(PIN_ID, n)
     }

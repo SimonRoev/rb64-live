@@ -13,8 +13,8 @@ android {
     defaultConfig {
         applicationId = "de.rb64.live"
         minSdk = 31   // Widget-Liste mit Startposition (RemoteCollectionItems) ab Android 12
-        versionCode = 10
-        versionName = "0.10"
+        versionCode = 11
+        versionName = "0.11"
         targetSdk = 36
     }
 
