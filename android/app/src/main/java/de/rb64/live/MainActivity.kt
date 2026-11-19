@@ -103,6 +103,7 @@ class MainActivity : ComponentActivity() {
         // Zurueck in die App mit alten Daten -> still nachladen (Antwort mit hoher Prioritaet)
         val snap = Repo.load(this)
         if (!Repo.isRefreshing(this) && (snap == null || snap.ageMs() > Snapshot.AUTO_REFRESH_MS)) refresh(this)
+        Updates.check(this)      // hoechstens alle 6 h: neue Version auf der Webseite?
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -331,6 +332,13 @@ private fun DeparturesScreen(
                     onClick = { if (!refreshing) refresh(ctx) })
             }
             snap?.notes?.let { notes -> items(notes) { Banner(it) } }
+            // neue App-Version auf der Webseite (nicht waehrend einer Fahrt)
+            val upd = Updates.available(ctx)      // nur ein Lesen aus den Einstellungen
+            if (upd != null && ride == null) item {
+                Banner("Neue Version ${upd.name} verfügbar", kind = "info",
+                    sub = (upd.notes.takeIf { it.isNotBlank() }?.let { "$it · " } ?: "") + "Antippen zum Herunterladen",
+                    onClick = { Updates.open(ctx, upd) })
+            }
 
             // angehefteter Zug steht oben, solange er in der Liste ist
             val hero = upcoming.firstOrNull { it.train == pinned } ?: upcoming.firstOrNull()
@@ -587,12 +595,51 @@ private fun SettingsScreen(onBack: () -> Unit) {
                 NavRow("Einführung anzeigen", "Strecke wählen, Zeiten lesen und alle Funktionen") {
                     Repo.prefs(ctx).edit().putBoolean("onboarded", false).apply()
                 }
+                var updMsg by remember { mutableStateOf<String?>(null) }
+                val upd = Updates.available(ctx)
+                NavRow(if (upd != null) "Version ${upd.name} herunterladen" else "Nach Updates suchen",
+                    updMsg ?: upd?.notes?.ifBlank { null } ?: "Installiert: ${BuildConfig.VERSION_NAME}") {
+                    if (upd != null) Updates.open(ctx, upd)
+                    else { updMsg = "Suche …"; Updates.check(ctx, force = true) { ok ->
+                        updMsg = when {
+                            !ok -> "Keine Verbindung zur Webseite"
+                            Updates.available(ctx) != null -> null
+                            else -> "Du hast die neueste Version (${BuildConfig.VERSION_NAME})"
+                        }
+                    } }
+                }
                 var feedback by remember { mutableStateOf(false) }
                 NavRow("Feedback senden", "Fehler, Ideen, Lob – anonym, ohne Konto") { feedback = true }
                 if (feedback) FeedbackDialog(context = null) { feedback = false }
             }
+
+            // ------------------------------------------------ Sicherung
+            var backupMsg by remember { mutableStateOf<String?>(null) }
+            val saveBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+                if (uri != null) backupMsg = runCatching { Backup.write(ctx, uri); "Gesichert: Einstellungen und " +
+                    "${de.rb64.live.ride.RideStore.history.value.size} Fahrt(en)." }
+                    .getOrElse { "Sichern fehlgeschlagen: ${it.message}" }
+            }
+            val openBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                if (uri != null) backupMsg = runCatching { Backup.read(ctx, uri).let { r ->
+                    "Wiederhergestellt: ${r.prefs} Einstellungen und ${r.rides} Fahrt(en)." } }
+                    .getOrElse { "Wiederherstellen fehlgeschlagen: ${it.message}" }
+            }
+            SectionHeader("Sicherung")
+            RbCard(padding = Dim.s8) {
+                NavRow("Daten sichern", "Einstellungen und Fahrten als Datei, z. B. für ein neues Handy") {
+                    saveBackup.launch("rb64-sicherung-${SimpleDateFormat("yyyy-MM-dd", Locale.GERMANY).format(Date())}.json")
+                }
+                NavRow("Sicherung wiederherstellen", "Vorhandene Fahrten bleiben, Einstellungen werden übernommen") {
+                    openBackup.launch(arrayOf("application/json", "application/octet-stream", "text/plain"))
+                }
+                backupMsg?.let { Text(it, style = Ts.small, color = Rb.c.primary, modifier = Modifier.padding(Dim.s8)) }
+            }
+
             val version = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() }
-            Text("RB64 Live" + (version?.let { " · Version $it" } ?: ""), style = Ts.small, color = muted,
+            val shortId = remember { Backup.shortId() }
+            Text("RB64 Live" + (version?.let { " · Version $it" } ?: "") + (shortId?.let { " · Kennung $it" } ?: ""),
+                style = Ts.small, color = muted,
                 modifier = Modifier.fillMaxWidth().padding(top = Dim.s8), textAlign = TextAlign.Center)
             Spacer(Modifier.height(40.dp))      // frei vom erhobenen Abfahrten-Knopf
         }

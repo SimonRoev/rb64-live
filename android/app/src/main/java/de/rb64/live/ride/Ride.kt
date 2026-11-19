@@ -200,6 +200,17 @@ object RideStore {
         if (_last.value?.info?.id == id) _last.value = _history.value.firstOrNull()?.let { load(ctx, it.id) }
     }
 
+    /** Fahrt aus einer Sicherung uebernehmen (false = war schon da oder unvollstaendig). */
+    fun importRide(ctx: Context, s: RideState): Boolean {
+        init(ctx)
+        if (s.ended == null || _history.value.any { it.id == s.info.id }) return false
+        rideFile(ctx, s.info.id).writeText(toJson(s).toString())
+        _history.value = (_history.value + meta(s)).sortedByDescending { it.started }.take(MAX_RIDES)
+        saveIndex(ctx)
+        _last.value = _history.value.firstOrNull()?.let { load(ctx, it.id) }
+        return true
+    }
+
     private fun saveIndex(ctx: Context) = runCatching {
         indexFile(ctx).writeText(JSONArray().apply { _history.value.forEach { put(metaJson(it)) } }.toString())
     }
