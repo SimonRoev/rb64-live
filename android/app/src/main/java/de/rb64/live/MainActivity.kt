@@ -587,6 +587,9 @@ private fun SettingsScreen(onBack: () -> Unit) {
                 NavRow("Einführung anzeigen", "Strecke wählen, Zeiten lesen und alle Funktionen") {
                     Repo.prefs(ctx).edit().putBoolean("onboarded", false).apply()
                 }
+                var feedback by remember { mutableStateOf(false) }
+                NavRow("Feedback senden", "Fehler, Ideen, Lob – anonym, ohne Konto") { feedback = true }
+                if (feedback) FeedbackDialog(context = null) { feedback = false }
             }
             val version = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() }
             Text("RB64 Live" + (version?.let { " · Version $it" } ?: ""), style = Ts.small, color = muted,

@@ -77,6 +77,24 @@ object Cloud {
         }
     }
 
+    /**
+     * Feedback anonym senden: feedback/{auto} = { uid, text, version?, device?, context?, created }.
+     * onDone(true) wenn gespeichert. Die VM holt es ab und meldet es dem Entwickler per Push.
+     */
+    fun sendFeedback(ctx: Context, text: String, withDevice: Boolean, context: String?, onDone: (Boolean) -> Unit) {
+        withUser { uid ->
+            val data = mutableMapOf<String, Any>("uid" to uid, "text" to text.take(4000), "created" to FieldValue.serverTimestamp())
+            if (withDevice) {
+                data["version"] = BuildConfig.VERSION_NAME
+                data["device"] = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE}"
+            }
+            context?.let { data["context"] = it }
+            FirebaseFirestore.getInstance().collection("feedback").add(data)
+                .addOnSuccessListener { onDone(true) }
+                .addOnFailureListener { Log.w(TAG, "Feedback nicht gesendet", it); onDone(false) }
+        }
+    }
+
     /** Frische Daten anfordern - die VM antwortet per Firebase Cloud Messaging. */
     fun requestRefresh(ctx: Context) {
         FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->

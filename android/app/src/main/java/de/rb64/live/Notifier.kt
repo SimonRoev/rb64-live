@@ -87,9 +87,13 @@ object Notifier {
     const val CH_PIN = "rb64_pin"
     const val CH_PIN_ALERT = "rb64_pin_alert"
     const val PIN_ID = 6410
+    const val CH_INFO = "rb64_info"
 
     fun createChannels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(NotificationChannel(CH_INFO, "Hinweise", NotificationManager.IMPORTANCE_DEFAULT).apply {
+            description = "Nachrichten zur App, z. B. neues Feedback (nur für den Entwickler)"
+        })
         nm.createNotificationChannel(NotificationChannel(CH_PIN, "Dein Zug (Sperrbildschirm)", NotificationManager.IMPORTANCE_DEFAULT).apply {
             setSound(null, null); enableVibration(false); setShowBadge(false)
             description = "Der angeheftete Zug mit aktueller Abfahrt, still"
@@ -106,6 +110,20 @@ object Notifier {
             setSound(null, null); enableVibration(true); vibrationPattern = longArrayOf(0, 250, 150, 250)
             description = "Ausfälle und Verspätungen deiner Züge, mit Vibration"
         })
+    }
+
+    /** Freie Nachricht von der VM anzeigen. */
+    fun showMessage(ctx: Context, title: String, body: String) {
+        if (!permitted(ctx)) return
+        createChannels(ctx)
+        val n = android.app.Notification.Builder(ctx, CH_INFO)
+            .setSmallIcon(R.drawable.ic_notify)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(android.app.Notification.BigTextStyle().bigText(body))
+            .setAutoCancel(true)
+            .build()
+        ctx.getSystemService(NotificationManager::class.java).notify((System.currentTimeMillis() % 100000).toInt() + 7000, n)
     }
 
     fun permitted(ctx: Context) =

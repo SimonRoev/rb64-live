@@ -227,6 +227,11 @@ fun SummaryScreen(s: RideState, onBack: () -> Unit) {
                 }
             }
             Spacer(Modifier.height(Dim.s8))
+            var feedback by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+            RbButton("Feedback zu dieser Fahrt", { feedback = true }, Modifier.fillMaxWidth(), primary = false)
+            if (feedback) de.rb64.live.FeedbackDialog(
+                context = "Fahrt ${s.info.train} ${s.info.from} → ${s.info.to} am ${SimpleDateFormat("dd.MM.", Locale.GERMANY).format(Date(s.started))} (${s.info.id.take(8)})",
+            ) { feedback = false }
             RbButton("Fahrt löschen …", { askDelete = true }, Modifier.fillMaxWidth(),
                 icon = RbIcons.delete, primary = false)
         }

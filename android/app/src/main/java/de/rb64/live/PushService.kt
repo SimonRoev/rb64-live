@@ -9,6 +9,10 @@ import de.rb64.live.widget.Rb64WidgetProvider
 class PushService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
+        if (message.data["type"] == "msg") {
+            Notifier.showMessage(applicationContext, message.data["t"] ?: "RB64 Live", message.data["b"] ?: "")
+            return
+        }
         val json = message.data["z"]?.let { runCatching { Repo.decode(it) }.getOrNull() }
             ?: message.data["p"] ?: return
         val snap = runCatching { Repo.save(applicationContext, json); Repo.parse(json) }
