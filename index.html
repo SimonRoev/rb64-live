@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RB64 Live</title>
+  <meta name="description" content="Echtzeit für die RB64 Münster–Enschede: wann dein Zug wirklich fährt, wo er gerade ist und warum er wartet.">
+  <meta name="theme-color" content="#0B5563">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%230B5563'/%3E%3Cpath d='M8 4h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM6 10h12M9 15l-2 4M15 15l2 4' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="logo" href="./">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M8 3h8a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z"/><path d="M5 10h14"/><path d="M9 17l-2 4M15 17l2 4"/>
+      </svg>
+      RB64 Live
+    </a>
+    <nav>
+      <a class="hide-sm" href="#funktionen">Funktionen</a>
+      <a href="datenschutz.html">Datenschutz</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="hero">
+    <div>
+      <span class="pill tint">Münster ↔ Enschede</span>
+      <h1>Wann fährt dein Zug wirklich?</h1>
+      <p class="lead">RB64 Live zeigt Abfahrten der RB64 in Echtzeit, rechnet mit, wenn Züge an Kreuzungen aufeinander warten –
+        und weiß dadurch oft früher als die Anzeige am Bahnsteig, wie spät es wird.</p>
+      <div class="actions">
+        <a class="btn" href="#funktionen">Funktionen ansehen</a>
+        <a class="btn soft" href="datenschutz.html">Deine Daten</a>
+      </div>
+      <p class="note">Ein privates Projekt, zurzeit im Test mit ein paar Pendlerinnen und Pendlern. Nicht im Play Store.</p>
+    </div>
+    <div class="phone"><img src="img/abfahrten.png" alt="Abfahrten Häger nach Münster Hbf: nächster Zug mit 8 Minuten Verspätung, darunter weitere Züge mit Grund der Verspätung" width="1080" height="2400"></div>
+  </div>
+
+  <section id="funktionen">
+    <h2>Was die App kann</h2>
+    <p class="sub">Gebaut für die eine Strecke – dafür richtig.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg></div>
+        <h3>Eigene Prognose</h3>
+        <p>Die RB64 ist größtenteils eingleisig. Ist ein Zug spät, wartet der Gegenzug – die App rechnet das voraus und nennt den Grund.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 1 0 4 0a2 2 0 1 0-4 0"/><path d="M16 19a2 2 0 1 0 4 0a2 2 0 1 0-4 0"/><path d="M6 7v4a4 4 0 0 0 4 4h4a4 4 0 0 1 4 4"/></svg></div>
+        <h3>Strecke live</h3>
+        <p>Alle Züge auf der Linie, entlang der echten Gleisführung, mit den Halten, an denen sie sich begegnen.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/></svg></div>
+        <h3>Dein Zug</h3>
+        <p>Zug anheften: Er steht auf dem Sperrbildschirm, und ändert sich die Abfahrt, meldet sich das Handy.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v14l11-7z"/></svg></div>
+        <h3>Mitfahren</h3>
+        <p>„Ich fahre mit“ zeigt unterwegs nächsten Halt, Ankunft und Tempo – auf Wunsch schon am Bahnsteig vorgeschlagen.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0"/><path d="M12 7v5l3 2"/></svg></div>
+        <h3>Deine Fahrten</h3>
+        <p>Jede Fahrt mit Karte und Tempo-Profil: wo der Zug stand, wo er schnell war, wie spät er ankam.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4z"/><path d="M13 16h7M16.5 13v7"/></svg></div>
+        <h3>Widgets</h3>
+        <p>Groß mit den nächsten Zügen oder klein nur mit dem nächsten – ohne die App zu öffnen.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>So sieht's aus</h2>
+    <p class="sub">Hell und dunkel, mit Farben nur da, wo sie etwas bedeuten.</p>
+    <div class="shots">
+      <figure><div class="phone"><img src="img/abfahrten.png" alt="Abfahrten mit Verspätungen und Gründen" loading="lazy" width="1080" height="2400"></div><figcaption>Abfahrten</figcaption></figure>
+      <figure><div class="phone"><img src="img/zeiten.png" alt="Einführung: wie man eine Abfahrt liest" loading="lazy" width="1080" height="2400"></div><figcaption>Zeiten lesen</figcaption></figure>
+      <figure><div class="phone"><img src="img/mitfahren.png" alt="Mitfahren: Warte auf den Zug, Halte mit erwarteten Zeiten" loading="lazy" width="1080" height="2400"></div><figcaption>Mitfahren</figcaption></figure>
+      <figure><div class="phone"><img src="img/fahrt.png" alt="Auswertung einer Fahrt mit Karte und Tempo-Profil" loading="lazy" width="1080" height="2400"></div><figcaption>Fahrt-Auswertung</figcaption></figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Deine Daten, kurz gesagt</h2>
+    <div class="privacy">
+      <ul>
+        <li><strong>Kein Konto, keine Werbung, kein Tracking.</strong> Die App meldet sich mit einer zufälligen Kennung an.</li>
+        <li><strong>Strecken und Einstellungen bleiben auf dem Handy.</strong> Meldungen entstehen auf deinem Gerät.</li>
+        <li><strong>Fahrten nur, wenn du mitfährst</strong> – nur Punkte entlang der Bahnstrecke. Beim Löschen wählst du: nur auf dem Handy oder überall.</li>
+        <li><strong>Standort am Bahnhof wird nicht gespeichert.</strong> Android meldet nur „du bist am Bahnhof“.</li>
+      </ul>
+      <p class="note">Alles im Detail: <a href="datenschutz.html">Datenschutzerklärung</a></p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>RB64 Live · privates Projekt, keine App der Deutschen Bahn oder von eurobahn</span>
+    <span><a href="datenschutz.html">Datenschutz</a></span>
+  </div>
+</footer>
+</body>
+</html>

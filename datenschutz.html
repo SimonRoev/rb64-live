@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Datenschutz – RB64 Live</title>
+  <meta name="description" content="Welche Daten die App RB64 Live verarbeitet, wozu und wie du sie löschen kannst.">
+  <meta name="theme-color" content="#0B5563">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="logo" href="./">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M8 3h8a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z"/><path d="M5 10h14"/><path d="M9 17l-2 4M15 17l2 4"/>
+      </svg>
+      RB64 Live
+    </a>
+    <nav><a href="./">Startseite</a></nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <article class="doc">
+    <h1>Datenschutzerklärung</h1>
+    <p>für die Android-App „RB64 Live“ · Stand: 19. November 2026</p>
+
+    <h2>Verantwortlich</h2>
+    <p><span class="todo">[Name]</span><br>
+      <span class="todo">[Anschrift]</span><br>
+      E-Mail: <span class="todo">[E-Mail-Adresse]</span></p>
+    <p>RB64 Live ist ein privates, nicht kommerzielles Projekt. Es ist keine App der Deutschen Bahn, von eurobahn oder NS.</p>
+
+    <h2>Kurz gesagt</h2>
+    <ul>
+      <li>Kein Konto, keine Werbung, keine Analyse- oder Tracking-Dienste.</li>
+      <li>Deine Strecken, Zeitfenster und Einstellungen bleiben auf deinem Handy.</li>
+      <li>Standortdaten werden nur gespeichert, wenn du eine Fahrt mit „Ich fahre mit“ aufzeichnest.</li>
+      <li>Fahrten kannst du jederzeit löschen – nur auf dem Handy oder auch auf dem Server.</li>
+    </ul>
+
+    <h2>1. Anonyme Kennung und Push</h2>
+    <p>Damit der Server dir aktuelle Zugdaten schicken kann, meldet sich die App beim Start anonym bei Google Firebase an.
+      Dabei entsteht eine zufällige Kennung; Name, E-Mail oder Telefonnummer werden nicht abgefragt.
+      Gespeichert werden diese Kennung, das Push-Token deines Geräts (Firebase Cloud Messaging) und der Zeitpunkt,
+      zu dem du zuletzt neue Daten angefordert hast.</p>
+    <p>Zweck: Zustellung der Zugdaten an die App. Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO (Bereitstellung der von dir genutzten App).</p>
+
+    <h2>2. Aufgezeichnete Fahrten</h2>
+    <p>Nur wenn du bei einem Zug „Ich fahre mit“ wählst, zeichnet die App per GPS auf. Gespeichert werden:</p>
+    <ul>
+      <li>Positionen mit Zeit, Geschwindigkeit und Genauigkeit – <strong>nur innerhalb des Bahnkorridors</strong>; Punkte abseits der Strecke werden verworfen,</li>
+      <li>daraus erkannte Halte, deine Markierungen (z. B. „vor Signal“, „sehr voll“),</li>
+      <li>Zugnummer, Start, Ziel und die zum Start bekannten Fahrplan- und Prognosezeiten.</li>
+    </ul>
+    <p>Brichst du die Aufzeichnung ab, bevor der Zug losfährt, wird nichts gespeichert. Nach der Fahrt wird sie zusammen mit
+      der anonymen Kennung an unseren Server übertragen. Dort wird sie ausgewertet, um die Verspätungsprognose für die RB64 zu
+      verbessern (z. B. wo Züge vor Signalen warten). Auf dem Server wird die Kennung nur als gekürzter Hashwert gespeichert.</p>
+    <p>Rechtsgrundlage: Art. 6 Abs. 1 lit. a DSGVO (deine Einwilligung durch das Starten der Aufzeichnung).</p>
+
+    <h2>3. Mitfahr-Vorschlag am Bahnhof</h2>
+    <p>Wenn du diese Funktion einschaltest, legt die App über die Google-Play-Dienste Bereiche um die Bahnhöfe deiner Strecken
+      fest (Geofencing). Android meldet der App nur „du bist seit einer Minute am Bahnhof X“. Dein Standort wird dafür
+      <strong>weder gespeichert noch übertragen</strong>. Die Funktion braucht die Berechtigung „Standort immer zulassen“
+      und lässt sich jederzeit in der App oder in den Android-Einstellungen abschalten.</p>
+
+    <h2>4. Was auf dem Handy bleibt</h2>
+    <p>Deine Strecken, Zeitfenster, angehefteter Zug, Darstellung und deine Fahrten-Liste werden nur auf deinem Gerät
+      gespeichert. Ob und wann eine Benachrichtigung erscheint, entscheidet die App auf deinem Gerät.</p>
+
+    <h2>5. Empfänger und Speicherort</h2>
+    <ul>
+      <li><strong>Google Firebase</strong> (Google Ireland Limited, Gordon House, Barrow Street, Dublin 4, Irland) für anonyme Anmeldung,
+        Push-Nachrichten und die Übertragung von Anfragen und Fahrten. Dabei kann eine Verarbeitung in den USA nicht
+        ausgeschlossen werden; Google ist nach dem EU-US Data Privacy Framework zertifiziert.</li>
+      <li><strong>Unser Auswerte-Server</strong> an der FH Münster, auf dem Fahrten und Zugdaten gespeichert und ausgewertet werden.</li>
+    </ul>
+    <p>Die Zugdaten selbst (Fahrpläne, Echtzeit) stammen von der Deutschen Bahn und NS; dafür werden keine Daten von dir an diese weitergegeben.</p>
+
+    <h2>6. Speicherdauer und Löschen</h2>
+    <ul>
+      <li><strong>Fahrten:</strong> bis du sie löschst. In der App unter Fahrten → Fahrt → „Fahrt löschen …“ wählst du
+        „Überall löschen“ (Messpunkte, Halte und Markierungen werden auch auf dem Server entfernt, in der Regel innerhalb
+        einer Minute; übrig bleibt nur ein Vermerk mit Zug, Strecke und Datum, dass die Fahrt gelöscht wurde) oder
+        „Nur auf dem Handy“ (die Fahrt bleibt anonym auf dem Server und wird weiter ausgewertet).</li>
+      <li><strong>Kennung und Push-Token:</strong> solange die App installiert ist. Nach dem Deinstallieren wird das Token ungültig.</li>
+    </ul>
+
+    <h2>7. Deine Rechte</h2>
+    <p>Du hast das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit und
+      Widerspruch sowie das Recht, eine erteilte Einwilligung jederzeit zu widerrufen. Schreib dazu an die oben genannte
+      E-Mail-Adresse. Weil die App keine Namen kennt, hilft es, wenn du Datum und Strecke der betroffenen Fahrten nennst.</p>
+    <p>Du kannst dich außerdem bei einer Datenschutz-Aufsichtsbehörde beschweren, zum Beispiel bei der Landesbeauftragten für
+      Datenschutz und Informationsfreiheit Nordrhein-Westfalen.</p>
+
+    <h2>8. Berechtigungen der App</h2>
+    <ul>
+      <li><strong>Benachrichtigungen:</strong> für Meldungen zu deinen Zügen.</li>
+      <li><strong>Genauer Standort:</strong> nur während einer Fahrtaufzeichnung.</li>
+      <li><strong>Standort im Hintergrund:</strong> nur für den Mitfahr-Vorschlag am Bahnhof (optional).</li>
+      <li><strong>Im Hintergrund ausführen</strong> (Ausnahme von der Akku-Optimierung, optional): damit Zugdaten auch bei
+        strengen Stromsparfunktionen ankommen.</li>
+    </ul>
+  </article>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>RB64 Live · privates Projekt</span>
+    <span><a href="./">Startseite</a></span>
+  </div>
+</footer>
+</body>
+</html>
