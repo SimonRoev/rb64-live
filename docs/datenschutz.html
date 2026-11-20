@@ -24,7 +24,7 @@
 <main class="wrap">
   <article class="doc">
     <h1>Datenschutzerklärung</h1>
-    <p>für die Android-App „RB64 Live“ · Stand: 19. November 2026</p>
+    <p>für die Android-App „RB64 Live“ · Stand: 20. November 2026</p>
 
     <h2>Verantwortlich</h2>
     <p>Simon Rövekamp<br>
@@ -36,6 +36,7 @@
       <li>Kein Konto, keine Werbung, keine Analyse- oder Tracking-Dienste.</li>
       <li>Deine Strecken, Zeitfenster und Einstellungen bleiben auf deinem Handy.</li>
       <li>Standortdaten werden nur gespeichert, wenn du eine Fahrt mit „Ich fahre mit“ aufzeichnest.</li>
+      <li>Live-Position teilen ist freiwillig und standardmäßig aus; gesendet wird dann nur die Position deines Zugs auf der Strecke, keine Koordinaten.</li>
       <li>Fahrten kannst du jederzeit löschen – nur auf dem Handy oder auch auf dem Server.</li>
     </ul>
 
@@ -57,6 +58,17 @@
       der anonymen Kennung an unseren Server übertragen. Dort wird sie ausgewertet, um die Verspätungsprognose für die RB64 zu
       verbessern (z. B. wo Züge vor Signalen warten). Auf dem Server wird die Kennung nur als gekürzter Hashwert gespeichert.</p>
     <p>Rechtsgrundlage: Art. 6 Abs. 1 lit. a DSGVO (deine Einwilligung durch das Starten der Aufzeichnung).</p>
+
+    <h2>2a. Live-Position teilen (freiwillig)</h2>
+    <p>Schaltest du in der App „Live-Position teilen“ ein (Einstellungen › Mitfahren oder in der Einführung), sendet die App
+      <strong>nur während einer Fahrt mit „Ich fahre mit“</strong> etwa alle 30 Sekunden: die Zugnummer, die Position des
+      Zugs auf der Strecke als Wert zwischen zwei Halten (z. B. „zwischen Ochtrup und Metelen Land“), die Geschwindigkeit und
+      den Zeitpunkt. <strong>GPS-Koordinaten werden dabei nicht übertragen</strong>; die Umrechnung geschieht auf deinem Handy.
+      Die Angaben liegen in Google Firebase unter deiner anonymen Kennung und werden am Ende der Fahrt gelöscht, spätestens nach
+      15 Minuten ohne neue Position. Zusätzlich wird bei deiner Kennung vermerkt, dass du teilst.</p>
+    <p>Unser Server leitet die Zugpositionen – ohne Kennung – nur an Geräte weiter, die selbst teilen. Daraus ist nicht
+      erkennbar, wer mitfährt. Ausschalten kannst du das jederzeit in den Einstellungen.</p>
+    <p>Rechtsgrundlage: Art. 6 Abs. 1 lit. a DSGVO (deine Einwilligung durch das Einschalten).</p>
 
     <h2>3. Mitfahr-Vorschlag am Bahnhof</h2>
     <p>Wenn du diese Funktion einschaltest, legt die App über die Google-Play-Dienste Bereiche um die Bahnhöfe deiner Strecken
@@ -86,6 +98,7 @@
         „Überall löschen“ (Messpunkte, Halte und Markierungen werden auch auf dem Server entfernt, in der Regel innerhalb
         einer Minute; übrig bleibt nur ein Vermerk mit Zug, Strecke und Datum, dass die Fahrt gelöscht wurde) oder
         „Nur auf dem Handy“ (die Fahrt bleibt anonym auf dem Server und wird weiter ausgewertet).</li>
+      <li><strong>Live-Position:</strong> bis zum Ende der Fahrt, spätestens 15 Minuten nach der letzten Position.</li>
       <li><strong>Kennung und Push-Token:</strong> solange die App installiert ist. Nach dem Deinstallieren wird das Token ungültig.</li>
     </ul>
 
