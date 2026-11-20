@@ -36,12 +36,26 @@ import java.util.UUID
 class RideService : Service() {
 
     private val loc by lazy { LocationServices.getFusedLocationProviderClient(this) }
+    private var liveWasOn = false
     private val cb = object : LocationCallback() {
         override fun onLocationResult(r: LocationResult) {
             for (l in r.locations) {
                 if (!Stations.inCorridor(l.latitude, l.longitude)) continue
                 val p = Pt(l.time, l.latitude, l.longitude, if (l.hasSpeed()) l.speed else -1f, l.accuracy)
                 RideStore.update(this@RideService) { s -> s.copy(points = s.points + p) }
+            }
+            // Live-Position teilen (falls eingeschaltet): erst nach der Abfahrt am Einstieg und nur bis zur Abfahrt
+            // am vorletzten Halt - so verraten weder Warten am Bahnsteig noch der Ausstieg, wo jemand ein-/aussteigt
+            RideStore.state.value?.let { cur ->
+                val deps = Analyzer.departures(cur.events)
+                val beforeLast = cur.info.stops.getOrNull(cur.info.stops.size - 2)
+                val sharing = deps.containsKey(cur.info.from) && beforeLast != null && beforeLast != cur.info.from &&
+                    !deps.containsKey(beforeLast)
+                val l = r.lastLocation
+                if (sharing && l != null && Stations.inCorridor(l.latitude, l.longitude))
+                    de.rb64.live.LiveGps.onLocation(this@RideService, cur.info.train, l.latitude, l.longitude)
+                else if (!sharing && liveWasOn) de.rb64.live.LiveGps.stop()
+                liveWasOn = sharing
             }
             val s0 = RideStore.state.value ?: return
             val ev = Analyzer.events(s0.points)
@@ -121,6 +135,7 @@ class RideService : Service() {
 
     private fun finishRide() {
         loc.removeLocationUpdates(cb)
+        de.rb64.live.LiveGps.stop()
         // vor der Abfahrt abgebrochen (z. B. frueh "Ich fahre mit" gedrueckt): nichts speichern oder hochladen
         val cur = RideStore.state.value
         if (cur != null && !isDeparted(cur)) {

@@ -28,6 +28,9 @@ object Cloud {
             .addOnFailureListener { Log.w(TAG, "Anonyme Anmeldung fehlgeschlagen", it) }
     }
 
+    /** Fuer Lesezugriffe auf oeffentliche Dokumente (Firestore-Regel verlangt eine Anmeldung). */
+    fun withUserPublic(block: () -> Unit) = withUser { block() }
+
     private fun doc(uid: String) = FirebaseFirestore.getInstance().collection("devices").document(uid)
 
     /** Firebase-Token bei der VM anmelden (nur wenn neu). */
@@ -96,6 +99,16 @@ object Cloud {
     }
 
     /** Frische Daten anfordern - die VM antwortet per Firebase Cloud Messaging. */
+    /** Live-Position teilen an/aus: die VM schickt Live-Positionen nur an Geraete mit liveShare = true. */
+    fun setLiveShare(ctx: Context, on: Boolean) {
+        FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+            withUser { uid ->
+                doc(uid).set(mapOf("token" to token, "liveShare" to on, "updated" to FieldValue.serverTimestamp()), SetOptions.merge())
+                    .addOnFailureListener { Log.w(TAG, "Live-Einstellung nicht gespeichert", it) }
+            }
+        }
+    }
+
     fun requestRefresh(ctx: Context) {
         FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
             withUser { uid ->

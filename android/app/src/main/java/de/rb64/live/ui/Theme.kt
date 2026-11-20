@@ -68,6 +68,8 @@ object Elev { val e1 = 1.dp; val e2 = 3.dp; val e3 = 8.dp }
 object Ts {
     private val base = TextStyle(fontFeatureSettings = "tnum")
     val hero = base.copy(fontSize = 40.sp, fontWeight = FontWeight.Bold, lineHeight = 44.sp, letterSpacing = (-1).sp)
+    /** Effekt "Große Abfahrtszeit": bricht bewusst die 40er-Regel, deshalb nur zuschaltbar. */
+    val heroXL = base.copy(fontSize = 56.sp, fontWeight = FontWeight.Bold, lineHeight = 60.sp, letterSpacing = (-1.5).sp)
     val big = base.copy(fontSize = 32.sp, fontWeight = FontWeight.Bold, lineHeight = 38.sp)
     val title = base.copy(fontSize = 20.sp, fontWeight = FontWeight.SemiBold, lineHeight = 26.sp)
     val titleBold = title.copy(fontWeight = FontWeight.Bold)

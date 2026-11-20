@@ -37,27 +37,18 @@ data class Settings(
     val threshold: Int = 5,          // ab +X min
     val onlyCancel: Boolean = false,
     val leadMin: Int = 30,           // nur fuer Abfahrten in den naechsten X min
-    val weekdaysOnly: Boolean = true,
-    val rels: Set<String> = setOf("3-8", "8-3"),
-    val windows: Map<String, Window> = emptyMap(),     // je Richtung "von-nach"
+    // Welche Strecken/Zuege, wann und an welchen Tagen: siehe NotifyRule / Rules (beliebig viele)
 ) {
     companion object {
         fun load(ctx: Context): Settings {
             val p = Repo.prefs(ctx)
             val d = Settings()
-            val favs = Repo.favs(ctx)
-            fun stored(id: String) = Window.decode(p.getString("n_win_$id", null))
-                ?: OLD_IDS.entries.firstOrNull { it.value == id }?.let { Window.decode(p.getString("n_win_${it.key}", null)) }
             return Settings(
                 enabled = p.getBoolean("n_enabled", d.enabled),
                 vibrate = p.getBoolean("n_vibrate", d.vibrate),
                 threshold = p.getInt("n_threshold", d.threshold),
                 onlyCancel = p.getBoolean("n_only_cancel", d.onlyCancel),
                 leadMin = p.getInt("n_lead", d.leadMin),
-                weekdaysOnly = p.getBoolean("n_weekdays", d.weekdaysOnly),
-                rels = (p.getStringSet("n_rels", d.rels) ?: d.rels).map { OLD_IDS[it] ?: it }.toSet(),
-                windows = favs.flatMap { f -> listOf(f.hinId to (stored(f.hinId) ?: WINDOW_HIN), f.backId to (stored(f.backId) ?: WINDOW_BACK)) }
-                    .toMap(),
             )
         }
     }
@@ -66,9 +57,7 @@ data class Settings(
         val e = Repo.prefs(ctx).edit()
             .putBoolean("n_enabled", enabled).putBoolean("n_vibrate", vibrate)
             .putInt("n_threshold", threshold).putBoolean("n_only_cancel", onlyCancel)
-            .putInt("n_lead", leadMin).putBoolean("n_weekdays", weekdaysOnly)
-            .putStringSet("n_rels", rels)
-        windows.forEach { (id, w) -> e.putString("n_win_$id", w.encode()) }
+            .putInt("n_lead", leadMin)
         e.apply()
     }
 }
@@ -197,7 +186,7 @@ object Notifier {
             .putExtra("train", r.train).putExtra("dep", r.depPlanned)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val n = Notification.Builder(ctx, if (alert) CH_PIN_ALERT else CH_PIN)
+        val n = Notification.Builder(ctx, if (alert) CH_PIN_ALERT else CH_PIN)   // Builder, wird unten ggf. zum Live Update
             .setSmallIcon(R.drawable.ic_notify)
             .setContentTitle(title)
             .setContentText(text)
@@ -208,8 +197,30 @@ object Notifier {
             .setCategory(Notification.CATEGORY_TRANSPORT)
             .setContentIntent(open)
             .setTimeoutAfter(maxOf(60_000L, r.arrEpoch - now + 5 * 60_000L))
-            .build()
-        nm.notify(PIN_ID, n)
+        // vor der Abfahrt: direkt einchecken ("Ich fahre mit" startet die Aufzeichnung in der App)
+        if (!departed && !r.cancelled && !r.bus) {
+            val checkin = PendingIntent.getActivity(ctx, 10, Intent(ctx, MainActivity::class.java)
+                .putExtra("checkin", true).putExtra("train", r.train)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            n.addAction(Notification.Action.Builder(null, "Ich fahre mit", checkin).build())
+        }
+        // Android 16+: als Live Update oben (Statusleisten-Chip, Sperrbildschirm), wie bei der Fahrt
+        if (android.os.Build.VERSION.SDK_INT >= 36 && Repo.pinLock(ctx) && !r.cancelled) {
+            val total = 1000
+            val primary = ctx.getColor(R.color.widget_primary)
+            val pts = r.stops.size.coerceAtLeast(2)
+            val prog = if (departed && r.marker >= 0) (r.marker.coerceIn(0.0, 1.0) * total).toInt() else 0
+            n.setStyle(Notification.ProgressStyle()
+                .setStyledByProgress(true)
+                .setProgressSegments(listOf(Notification.ProgressStyle.Segment(total).setColor(primary)))
+                .setProgressPoints((0 until pts).map { i -> Notification.ProgressStyle.Point(i * total / (pts - 1)).setColor(primary) })
+                .setProgress(prog)
+                .setProgressTrackerIcon(android.graphics.drawable.Icon.createWithResource(ctx, R.drawable.ic_notify)))
+            n.setRequestPromotedOngoing(true)
+            n.setShortCriticalText(if (departed) "an ${r.arrExpected}" else "ab ${r.depExpected}")
+        }
+        nm.notify(PIN_ID, n.build())
     }
 
     fun onPayload(ctx: Context, snap: Snapshot) {
@@ -218,23 +229,20 @@ object Notifier {
         // waehrend einer Fahrtaufzeichnung sitzt man schon im Zug -> keine Meldungen zu anderen Zuegen
         de.rb64.live.ride.RideStore.init(ctx)
         if (de.rb64.live.ride.RideStore.state.value != null) return
-        val cal = Calendar.getInstance()
-        val dow = cal.get(Calendar.DAY_OF_WEEK)
-        if (s.weekdaysOnly && (dow == Calendar.SATURDAY || dow == Calendar.SUNDAY)) return
+        val dow = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
 
         val state = ctx.getSharedPreferences("rb64_notify", Context.MODE_PRIVATE)
         if (state.getString("day", null) != today()) state.edit().clear().putString("day", today()).apply()
 
         val now = System.currentTimeMillis()
         val nm = ctx.getSystemService(NotificationManager::class.java)
-        val rels = Repo.directedRels(ctx).map { it.first }.filter { it in s.rels && !isMuted(ctx, it) }
-            .mapNotNull { Repo.relById(snap, it) }
-        for (rel in rels) {
-            val win = s.windows[rel.id] ?: continue
+        // alle aktiven Regeln fuer heute, je Strecke zusammengefasst (gleicher Zug -> eine Meldung)
+        val active = Rules.load(ctx).filter { it.on && dow in it.days && !isMuted(ctx, it.relId) }
+        for ((relId, rules) in active.groupBy { it.relId }) {
+            val rel = Repo.relById(snap, relId) ?: continue
             for (r in rel.rows) {
                 if (r.past || r.bus || r.depEpoch == 0L) continue
-                val planMin = minutesOf(r.depPlanned) ?: continue
-                if (!win.contains(planMin)) continue                      // nur Zuege im Zeitfenster
+                if (rules.none { it.matches(r) }) continue                 // Zeitfenster bzw. gewaehlter Zug
                 val minsAhead = (r.depEpoch - now) / 60_000
                 if (minsAhead < 0 || minsAhead > s.leadMin) continue      // nur kurz vor Abfahrt
                 val st = when {

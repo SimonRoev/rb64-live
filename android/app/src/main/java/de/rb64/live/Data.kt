@@ -88,12 +88,31 @@ data class Trip(
     val pos: Double,                 // Position als seq (Zwischenwerte = unterwegs), -1 = nicht unterwegs
     val reasons: List<Reason>, val code: String?,
     val realtime: Boolean = true,
+    val link: VehicleLink? = null,   // Vorfahrt des Fahrzeugs (nur vor dem Start)
+    val gps: Boolean = false,        // Position kommt live vom Handy eines Mitfahrers
 )
 
 /** Live-Karte: seq 1 = Hbf ... (Zwischenwerte = unterwegs). */
 data class MapStation(val name: String, val seq: Double, val wait: Boolean)
-data class MapTrain(val train: String, val toEnschede: Boolean, val seq: Double, val delay: Int, val bus: Boolean, val at: String?)
+data class MapTrain(val train: String, val toEnschede: Boolean, val seq: Double, val delay: Int, val bus: Boolean, val at: String?,
+                    val gps: Boolean = false)
 data class LiveMap(val stations: List<MapStation>, val trains: List<MapTrain>)
+
+/** Fahrt eines Zugs ab seinem naechsten Halt bis zum Ziel (fuer das Detailblatt aus "Strecke live"). */
+fun Snapshot.relForTrain(train: String, now: Long = System.currentTimeMillis()): Pair<Rel, Row>? {
+    val t = trips.firstOrNull { it.train == train } ?: return null
+    val seqs = t.stops.map { it.seq }.distinct().let { if (t.toEnschede) it.sorted() else it.sortedDescending() }
+    if (seqs.size < 2) return null
+    val last = seqs.last()
+    val next = when {
+        t.pos < 0 -> seqs.first()
+        t.toEnschede -> seqs.firstOrNull { it >= t.pos } ?: last
+        else -> seqs.firstOrNull { it <= t.pos } ?: last
+    }
+    val from = if (next == last) seqs[seqs.size - 2] else next
+    val r = rel(from, last, now)
+    return r.rows.firstOrNull { it.train == train }?.let { r to it }
+}
 
 /** ts = Sendezeit, fresh = letzte erfolgreiche DB-Abfrage auf dem Server (Datenstand). */
 data class Snapshot(
@@ -136,6 +155,7 @@ data class Snapshot(
             val strip = section.map { s ->
                 val time = when {
                     s.cancelled -> ""
+                    s.seq == to && s.par != null -> hm(s.par + (s.dar ?: 0))      // Ziel: Ankunft, nicht Weiterfahrt
                     s.pdp != null -> hm(s.pdp + (s.ddp ?: 0))
                     s.par != null -> hm(s.par + (s.dar ?: 0))
                     else -> ""
@@ -184,7 +204,7 @@ data class Snapshot(
             val last = if (t.toEnschede) t.stops.lastOrNull { it.seq <= t.pos + 0.01 } else t.stops.lastOrNull { it.seq >= t.pos - 0.01 }
             val r = Math.round(t.pos).toInt()
             MapTrain(t.train, t.toEnschede, t.pos, last?.let { it.ddp ?: it.dar } ?: 0, t.bus,
-                if (kotlin.math.abs(t.pos - r) < 0.02) name(r) else null)
+                if (kotlin.math.abs(t.pos - r) < 0.02) name(r) else null, gps = t.gps)
         }
         return LiveMap(st, tr)
     }
@@ -254,8 +274,11 @@ object Repo {
                 val reasons = t.optJSONArray("r")?.let { ra ->
                     List(ra.length()) { k -> ra.getJSONArray(k).let { Reason(it.getInt(0), it.getString(1), it.optInt(2) == 1) } }
                 } ?: emptyList()
+                val link = t.optJSONArray("u")?.takeIf { it.length() >= 2 }?.let { u ->
+                    VehicleLink(u.getString(0), u.optInt(1), u.optInt(2) == 1)
+                }
                 Trip(t.getString("n"), t.getString("d") == "ES", t.optInt("b") == 1, stops, t.optDouble("p", -1.0),
-                    reasons, t.optString("c").ifBlank { null }, realtime = t.optInt("f") != 1)
+                    reasons, t.optString("c").ifBlank { null }, realtime = t.optInt("f") != 1, link = link)
             }
         }
         val ts = o.getLong("ts")
@@ -283,7 +306,7 @@ object Repo {
 
     fun load(ctx: Context): Snapshot? {
         val s = prefs(ctx).getString("payload", null) ?: return null
-        return runCatching { parse(s) }.getOrNull()
+        return runCatching { parse(s).withLiveGps(ctx) }.getOrNull()
     }
 
     // ---------------------------------------------------------------- Meine Strecken
@@ -390,7 +413,8 @@ object Repo {
     fun themeMode(ctx: Context): String = prefs(ctx).getString("theme_mode", "system") ?: "system"
     fun setThemeMode(ctx: Context, mode: String) = prefs(ctx).edit().putString("theme_mode", mode).apply()
 
-    fun visuals(ctx: Context): Visuals = Visuals(VISUAL_OPTIONS.associate { (k, _, _) -> k to prefs(ctx).getBoolean("vis_$k", true) })
+    fun visuals(ctx: Context): Visuals =
+        Visuals(VISUAL_OPTIONS.associate { (k, _, _) -> k to prefs(ctx).getBoolean("vis_$k", k !in VISUAL_DEFAULT_OFF) })
     fun setVisual(ctx: Context, key: String, on: Boolean) = prefs(ctx).edit().putBoolean("vis_$key", on).apply()
     fun setAllVisuals(ctx: Context, on: Boolean) =
         prefs(ctx).edit().apply { VISUAL_OPTIONS.forEach { (k, _, _) -> putBoolean("vis_$k", on) } }.apply()
@@ -434,11 +458,15 @@ val VISUAL_OPTIONS = listOf(
     Triple("map_true", "Streckentreue Live-Linie", "Abstände und leichter Schwung wie die echte Strecke; aus = gerade Linie mit gleichen Abständen"),
     Triple("animations", "Sanfte Bewegungen", "Züge gleiten bei neuen Daten an ihre Position"),
     Triple("widget_strip", "Schattenstreifen im Widget", "Unter der Kopfleiste des Widgets"),
+    Triple("big_time", "Große Abfahrtszeit", "Die Zeit im Kasten oben deutlich größer, gut lesbar im Gehen"),
 )
+
+/** Effekte, die standardmaessig aus sind (alle anderen sind an). */
+val VISUAL_DEFAULT_OFF = setOf("big_time", "map_true")   // Live-Strecke standardmaessig gerade (gleiche Abstaende)
 
 /** Welche Effekte an sind (unbekannte Schluessel = an). */
 class Visuals(private val m: Map<String, Boolean> = emptyMap()) {
-    fun on(key: String) = m[key] ?: true
+    fun on(key: String) = m[key] ?: (key !in VISUAL_DEFAULT_OFF)
     val shadows get() = on("shadows")
     val colorHeader get() = on("color_header")
     val relTime get() = on("rel_time")
@@ -449,6 +477,7 @@ class Visuals(private val m: Map<String, Boolean> = emptyMap()) {
     val mapTrue get() = on("map_true")
     val animations get() = on("animations")
     val widgetStrip get() = on("widget_strip")
+    val bigTime get() = on("big_time")
     val countOn get() = VISUAL_OPTIONS.count { on(it.first) }
 }
 

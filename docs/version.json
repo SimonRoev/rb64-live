@@ -1,10 +1,10 @@
 {
-  "versionCode": 11,
-  "versionName": "0.11",
-  "date": "2026-11-19",
+  "versionCode": 13,
+  "versionName": "0.13",
+  "date": "2026-11-20",
   "url": "https://simonroev.github.io/rb64-live/download/rb64-live.apk",
   "page": "https://simonroev.github.io/rb64-live/#download",
-  "sha256": "5ed919ac4db68e06d6b2f910913e4f41ed2374bec0a0e73ed9196f4a91e2c773",
-  "size": 30284093,
-  "notes": "Behoben: „Dein Zug ist unterwegs“ blieb nach der Ankunft stehen"
+  "sha256": "0a3ec587ef9f04eb78883c452ee4e29220571f6f7a90db5d996812303cdf8c2d",
+  "size": 30464317,
+  "notes": "Live-Position teilen, Woher kommt dein Zug, Verlauf je Abfahrt, Prognose-Check, Anheften als Hauptknopf"
 }

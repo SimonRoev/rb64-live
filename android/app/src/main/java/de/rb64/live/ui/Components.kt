@@ -18,6 +18,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -77,6 +86,75 @@ fun RbCard(
 }
 
 /** Pille (rund) fuer Status. */
+/**
+ * Detailblatt von unten. Bleibt unter der Statusleiste (oben ein Rand, damit man sieht, dass es ein Blatt ist).
+ * Der Inhalt muss selbst scrollen (z. B. [SheetBody]); die Navigationsleiste unten beruecksichtigt [SheetBody].
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RbSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        modifier = Modifier.statusBarsPadding().padding(top = Dim.s24),
+        contentWindowInsets = { WindowInsets(0) },
+        containerColor = Rb.c.surface3,
+        shape = RoundedCornerShape(topStart = Dim.rSheet, topEnd = Dim.rSheet),
+        content = content,
+    )
+}
+
+/** Fester Kopf + scrollender Inhalt fuer [RbSheet]. Beim Scrollen trennt eine Linie den Kopf ab. */
+@Composable
+fun SheetBody(header: @Composable ColumnScope.() -> Unit, body: @Composable ColumnScope.() -> Unit) {
+    val scroll = androidx.compose.foundation.rememberScrollState()
+    // Hochscrollen soll oben anhalten: Nur eine Geste, die schon oben beginnt, darf das Blatt nach unten ziehen.
+    // Rest-Scrollen und Schwung aus einer Geste von weiter unten schluckt diese Verbindung.
+    val startedAtTop = androidx.compose.runtime.remember { booleanArrayOf(true) }
+    val stopAtTop = androidx.compose.runtime.remember {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset,
+                                      source: androidx.compose.ui.input.nestedscroll.NestedScrollSource) =
+                if (available.y > 0 && (!startedAtTop[0] || source != androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput))
+                    available else androidx.compose.ui.geometry.Offset.Zero
+            override suspend fun onPostFling(consumed: androidx.compose.ui.unit.Velocity, available: androidx.compose.ui.unit.Velocity) =
+                if (available.y > 0 && !startedAtTop[0]) available else androidx.compose.ui.unit.Velocity.Zero
+        }
+    }
+    Column(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = Dim.s16).padding(bottom = Dim.s12), content = header)
+        Box(Modifier.fillMaxWidth().height(1.dp).background(if (scroll.value > 0) Rb.c.line else Color.Transparent))
+        Column(
+            Modifier.weight(1f, fill = false)
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                        startedAtTop[0] = scroll.value == 0
+                    }
+                }
+                .nestedScroll(stopAtTop).verticalScroll(scroll)
+                .padding(horizontal = Dim.s16).padding(top = Dim.s12, bottom = Dim.s24).navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(Dim.s16), content = body,
+        )
+    }
+}
+
+/** Abschnitt, der sich auf- und zuklappen laesst (Kopfzeile antippbar, mind. 48 dp). */
+@Composable
+fun Collapsible(title: String, open: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier,
+                badge: (@Composable () -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier) {
+        Row(Modifier.fillMaxWidth().heightIn(min = Dim.touch).clip(RoundedCornerShape(Dim.rButton)).clickable(onClick = onToggle),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dim.s8)) {
+            Text(title, style = Ts.textStrong, modifier = Modifier.weight(1f))
+            badge?.invoke()
+            Icon(if (open) RbIcons.chevronUp else RbIcons.chevronDown, if (open) "zuklappen" else "aufklappen",
+                tint = Rb.c.muted, modifier = Modifier.size(Dim.icon))
+        }
+        content()
+    }
+}
+
 @Composable
 fun Pill(text: String, fg: Color, bg: Color) {
     Text(text, style = Ts.smallBold, color = fg, maxLines = 1,
@@ -111,6 +189,17 @@ fun RbButton(
 }
 
 /** Icon-Knopf mit 48er Tippflaeche und Beschreibung fuer TalkBack. */
+/** Zweitaktion als Textknopf mit Symbol (mind. 48 dp hoch), z. B. unter dem Hauptknopf. */
+@Composable
+fun TextAction(text: String, icon: ImageVector?, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.heightIn(min = Dim.touch).clip(RoundedCornerShape(Dim.rButton))
+        .clickable(role = Role.Button, onClick = onClick).padding(horizontal = Dim.s8),
+        verticalAlignment = Alignment.CenterVertically) {
+        if (icon != null) { Icon(icon, null, tint = Rb.c.primary, modifier = Modifier.size(Dim.iconSmall)); Spacer(Modifier.width(6.dp)) }
+        Text(text, style = Ts.smallStrong, color = Rb.c.primary)
+    }
+}
+
 @Composable
 fun IconBtn(icon: ImageVector, description: String, onClick: () -> Unit, tint: Color = Rb.c.onSurface, busy: Boolean = false) {
     Box(

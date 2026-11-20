@@ -245,6 +245,7 @@ private val DAY = SimpleDateFormat("EE dd.MM.", Locale.GERMANY)
 /** Alle gespeicherten Fahrten, neueste zuerst; oben eine kleine Bilanz. Antippen oeffnet die Auswertung. */
 @Composable
 fun RideListScreen(rides: List<RideMeta>, onOpen: (String) -> Unit, onGoDepartures: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     Column(Modifier.fillMaxSize()) {
         TopBar("Fahrten")
         androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f),
@@ -271,6 +272,12 @@ fun RideListScreen(rides: List<RideMeta>, onOpen: (String) -> Unit, onGoDepartur
                         if (d.isNotEmpty()) Stat("${d.count { it < 3 } * 100 / d.size} %", "pünktlich")
                     }
                 }
+            }
+            // Prognose-Check: wie lagen Prognose und DB bei deinen angehefteten Zuegen?
+            val checks = de.rb64.live.PCheckStore.done(ctx)
+            if (checks.isNotEmpty()) {
+                item { SectionHeader("Prognose-Check") }
+                items(checks.size) { k -> de.rb64.live.PCheckCard(checks[k], compact = true) }
             }
             if (rides.isNotEmpty()) item { SectionHeader("Aufgezeichnet") }
             items(rides.size) { k ->

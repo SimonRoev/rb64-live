@@ -82,10 +82,9 @@ object Fences {
         val now = System.currentTimeMillis()
         if (now - p.getLong("ride_ended", 0) < 15 * 60_000) return                  // gerade mit dem Zug angekommen
         if (now - p.getLong("prompt_$station", 0) < 45 * 60_000) return             // schon vorgeschlagen
-        val s = Settings.load(ctx)
+        val rules = de.rb64.live.Rules.load(ctx).filter { !it.isTrain }
         val cal = Calendar.getInstance()
         val dow = cal.get(Calendar.DAY_OF_WEEK)
-        if (s.weekdaysOnly && (dow == Calendar.SATURDAY || dow == Calendar.SUNDAY)) return
         val minute = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
 
         val snap = Repo.load(ctx) ?: return
@@ -105,8 +104,10 @@ object Fences {
         }
         // sonst: naechster Zug je Strecke, nur Strecken mit passendem Zeitfenster (+/- 30 min Spielraum)
         val options = if (pinned != null) listOf(pinned) else ids.mapNotNull { id ->
-            val win = s.windows[id]
-            if (win != null && (minute < win.from - 30 || minute > win.to + 30)) return@mapNotNull null
+            // gibt es Regeln fuer diese Richtung, muss eine davon heute passen (Zeitfenster +/- 30 min)
+            val forRel = rules.filter { it.relId == id }
+            if (forRel.isNotEmpty() && forRel.none { it.on && dow in it.days && minute in (it.window.from - 30)..(it.window.to + 30) })
+                return@mapNotNull null
             val rel = Repo.relById(snap, id) ?: return@mapNotNull null
             val row = rel.rows.firstOrNull { stillHere(it) } ?: return@mapNotNull null
             rel to row

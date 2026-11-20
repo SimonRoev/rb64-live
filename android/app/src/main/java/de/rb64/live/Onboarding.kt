@@ -199,8 +199,10 @@ private fun ColumnScope.PageLive() {
 @Composable
 private fun ColumnScope.PageRide() {
     Head(RbIcons.pin, "Dein Zug", "Tippe auf einen Zug für alle Halte, Gründe und Gleise. Dort kannst du ihn anheften oder mitfahren.")
-    Bullet(RbIcons.pin, "Anheften", "Der Zug steht oben als „Mein Zug“ und auf dem Sperrbildschirm. Ändert sich die Abfahrt um mehr als ein paar Minuten, kommt eine Meldung (einstellbar).")
-    Bullet(RbIcons.play, "Ich fahre mit", "Startet eine Aufzeichnung per GPS. Bis der Zug kommt, siehst du „Warte auf …“, danach den nächsten Halt, die Ankunft und die Geschwindigkeit – auch auf dem Sperrbildschirm.")
+    Bullet(RbIcons.pin, "Anheften", "Der Zug steht oben als „Dein Zug“ und auf dem Sperrbildschirm. Ändert sich die Abfahrt um mehr als ein paar Minuten, kommt eine Meldung (einstellbar).")
+    Bullet(RbIcons.play, "Ich fahre mit", "Ein Knopf – in der App oder in der Meldung deines angehefteten Zugs. Startet eine Aufzeichnung per GPS: " +
+        "bis der Zug kommt „Warte auf …“, danach nächster Halt, Ankunft und Geschwindigkeit. Hast du in den Einstellungen " +
+        "„Live-Position teilen“ an, teilt jede Fahrt automatisch mit – dafür siehst du andere Mitfahrer live.")
     Bullet(RbIcons.signal, "Unterwegs melden", "Funkloch oder voller Zug? Mit einem Tipp in der Meldung festhalten. Deine Fahrten helfen, die Prognose zu verbessern.")
     Bullet(RbIcons.rides, "Automatisch", "Stehst du an deinem Bahnhof, fragt die App, ob du mitfährst – „Los“ geht direkt vom Sperrbildschirm.")
 }
@@ -225,6 +227,9 @@ private fun ColumnScope.PagePrivacy() {
     Bullet(RbIcons.rides, "Fahrten nur, wenn du mitfährst",
         "Erst nach „Ich fahre mit“ zeichnet die App per GPS auf – nur Punkte entlang der Bahnstrecke, dazu Halte und deine Markierungen. " +
             "Die Fahrt geht anonym an unseren Server, damit die Prognose besser wird. Beim Löschen wählst du: nur auf dem Handy oder überall.")
+    Bullet(RbIcons.live, "Live-Position nur, wenn du sie teilst",
+        "Freiwillig und standardmäßig aus: Während du mitfährst, sendet die App alle 30 s nur, wo auf der Strecke dein Zug ist " +
+            "und wie schnell er fährt – ohne Koordinaten, anonym. Das sehen nur andere, die selbst teilen; am Fahrtende wird es gelöscht.")
     Bullet(RbIcons.location, "Standort am Bahnhof wird nicht gespeichert",
         "Für den Mitfahr-Vorschlag meldet Android der App nur „du bist am Bahnhof X“. Der Standort wird dabei weder gespeichert noch gesendet.")
     Bullet(RbIcons.lock, "Wo die Daten liegen",
@@ -251,8 +256,9 @@ private fun ColumnScope.PageFeatures() {
 
     // 1) Meldungen: Erlaubnis -> Benachrichtigungen fuer alle Richtungen an
     fun enableNotify() {
-        val s = Settings.load(ctx)
-        s.copy(enabled = true, rels = s.rels + Repo.directedRels(ctx).map { it.first }).save(ctx)     // eigene Strecken an
+        Settings.load(ctx).copy(enabled = true).save(ctx)
+        // noch nichts selbst eingestellt -> Standard: deine Strecken (hin morgens, zurueck nachmittags)
+        if (!Repo.prefs(ctx).getBoolean("n_rules_custom", false)) Rules.save(ctx, Rules.defaults(ctx))
         nOn = notifyOn(ctx)
     }
     val askNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) enableNotify() }
@@ -280,6 +286,13 @@ private fun ColumnScope.PageFeatures() {
         preview = {
             NotifPreview("Häger → Münster Hbf: 07:45 statt 07:33 (+12)", "Wartet in Altenberge auf den verspäteten Gegenzug", null)
         },
+        extra = if (nOn) ({
+            Spacer(Modifier.height(Dim.s12))
+            Text("Deine Benachrichtigungen – Zeiten und Tage antippen zum Anpassen. Weitere, auch für einzelne Züge, " +
+                "in den Einstellungen.", style = Ts.small, color = Rb.c.muted)
+            Spacer(Modifier.height(Dim.s8))
+            RulesEditor(enabled = true, compact = true)
+        }) else null,
     ) {
         if (android.os.Build.VERSION.SDK_INT >= 33 && !granted(ctx, Manifest.permission.POST_NOTIFICATIONS))
             askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -301,6 +314,16 @@ private fun ColumnScope.PageFeatures() {
     }
     if (fDenied && !fOn) Text("Ohne „Immer zulassen“ bleibt der Vorschlag aus. „Ich fahre mit“ funktioniert trotzdem.",
         style = Ts.small, color = Rb.c.warn)
+
+    var liveOn by remember { mutableStateOf(LiveGps.enabled(ctx)) }
+    FeatureCard(
+        title = "Live-Position teilen",
+        text = "Während du mitfährst, siehst du die Züge anderer Mitfahrer live auf der Strecke – wenn du selbst teilst. " +
+            "Gesendet wird nur, wo auf der Strecke dein Zug ist, ohne Koordinaten und anonym.",
+        permission = "Keine weitere Berechtigung. Gilt nur während „Ich fahre mit“, jederzeit in den Einstellungen abschaltbar.",
+        on = liveOn,
+        preview = null,
+    ) { LiveGps.setEnabled(ctx, true); liveOn = true }
 
     if (battery) BatteryCard()
 }

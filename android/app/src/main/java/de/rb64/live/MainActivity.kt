@@ -95,7 +95,8 @@ class MainActivity : ComponentActivity() {
         refresh(this)                       // beim Oeffnen frische Daten anfordern
         setContent { ThemedRoot(this) }
         if (intent?.getBooleanExtra("summary", false) == true) UiRequests.summary.value = true
-        intent?.getStringExtra("train")?.let { UiRequests.openTrain.value = it to (intent.getStringExtra("dep") ?: "") }
+        if (intent?.getBooleanExtra("checkin", false) == true) UiRequests.checkin.value = intent.getStringExtra("train")
+        else intent?.getStringExtra("train")?.let { UiRequests.openTrain.value = it to (intent.getStringExtra("dep") ?: "") }
     }
 
     override fun onResume() {
@@ -104,12 +105,14 @@ class MainActivity : ComponentActivity() {
         val snap = Repo.load(this)
         if (!Repo.isRefreshing(this) && (snap == null || snap.ageMs() > Snapshot.AUTO_REFRESH_MS)) refresh(this)
         Updates.check(this)      // hoechstens alle 6 h: neue Version auf der Webseite?
+        HistStore.refreshIfDue(this)   // Verlauf je Abfahrt, hoechstens alle 6 h
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra("summary", false)) UiRequests.summary.value = true
-        intent.getStringExtra("train")?.let { UiRequests.openTrain.value = it to (intent.getStringExtra("dep") ?: "") }
+        if (intent.getBooleanExtra("checkin", false)) UiRequests.checkin.value = intent.getStringExtra("train")
+        else intent.getStringExtra("train")?.let { UiRequests.openTrain.value = it to (intent.getStringExtra("dep") ?: "") }
     }
 }
 
@@ -120,6 +123,8 @@ object UiRequests {
     val openTrain = androidx.compose.runtime.mutableStateOf<Pair<String, String>?>(null)
     /** Gespeicherte Fahrt, deren Auswertung im Tab "Fahrten" offen ist. */
     val openRide = androidx.compose.runtime.mutableStateOf<String?>(null)
+    /** "Ich fahre mit" aus dem Live Update des angehefteten Zugs (Zugnummer). */
+    val checkin = androidx.compose.runtime.mutableStateOf<String?>(null)
 }
 
 /** Aktualisieren anstossen: Anzeige "Aktualisiere …" in App und Widget, Antwort kommt per Firebase. */
@@ -199,6 +204,16 @@ private fun AppRoot() {
             de.rb64.live.ride.RideService.start(ctx, info); tab = TAB_RIDES
         } else { pending = info; askLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) }
     }
+    // "Ich fahre mit" aus der Benachrichtigung des angehefteten Zugs: Fahrt starten (fragt ggf. nach Standort)
+    var checkinReq by UiRequests.checkin
+    LaunchedEffect(checkinReq) {
+        val train = checkinReq ?: return@LaunchedEffect
+        checkinReq = null
+        val snap = Repo.load(ctx) ?: return@LaunchedEffect
+        val rel = Repo.pinnedRelId(ctx)?.let { Repo.relById(snap, it) } ?: return@LaunchedEffect
+        val row = rel.rows.firstOrNull { it.train == train } ?: return@LaunchedEffect
+        if (de.rb64.live.ride.RideStore.state.value == null) startRide(rel, row)
+    }
     fun stopRide() = ctx.startService(Intent(ctx, de.rb64.live.ride.RideService::class.java).setAction(de.rb64.live.ride.RideService.ACTION_STOP))
 
     var prevTab by remember { mutableIntStateOf(TAB_DEP) }
@@ -272,6 +287,20 @@ private fun DeparturesScreen(
         if (r.train != pinned && !Notifier.permitted(ctx)) askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
         else Notifier.onPinned(ctx, snap)
     }
+    var notifyTick by remember { mutableIntStateOf(0) }
+    val askNotifyForTrain = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) Settings.load(ctx).copy(enabled = true).save(ctx)
+    }
+    /** Einzelnen Zug fuer Benachrichtigungen an-/abmelden (schaltet Benachrichtigungen bei Bedarf ein). */
+    fun toggleNotify(rel: Rel, r: Row) {
+        val nowOn = Rules.toggleTrain(ctx, rel, r)
+        Repo.prefs(ctx).edit().putBoolean("n_rules_custom", true).apply()
+        if (nowOn && !Settings.load(ctx).enabled) {
+            if (Notifier.permitted(ctx)) Settings.load(ctx).copy(enabled = true).save(ctx)
+            else askNotifyForTrain.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        notifyTick++
+    }
     fun rideHere(r: Row) = ride?.info?.train == r.train
     fun canRide(r: Row) = ride == null && !r.cancelled && upcoming.indexOf(r) in 0..1
 
@@ -339,7 +368,6 @@ private fun DeparturesScreen(
                     sub = (upd.notes.takeIf { it.isNotBlank() }?.let { "$it · " } ?: "") + "Antippen zum Herunterladen",
                     onClick = { Updates.open(ctx, upd) })
             }
-
             // angehefteter Zug steht oben, solange er in der Liste ist
             val hero = upcoming.firstOrNull { it.train == pinned } ?: upcoming.firstOrNull()
             if (hero == null) item {
@@ -350,7 +378,9 @@ private fun DeparturesScreen(
             } else item(key = "hero") {
                 HeroCard(hero, now, stale, rideHere(hero), canRide(hero),
                     onOpen = { sheetRow = hero }, onRide = { rel?.let { onStartRide(it, hero) } }, onStopRide = onStopRide,
-                    pinned = hero.train == pinned, rideDeparted = rideDeparted)
+                    pinned = hero.train == pinned, rideDeparted = rideDeparted,
+                    vehicle = snap?.vehicleFor(hero.train, now),
+                    onTogglePin = { togglePin(hero) })
             }
 
             val rest = upcoming.filter { it !== hero }
@@ -376,13 +406,17 @@ private fun DeparturesScreen(
     val sr = sheetRow
     if (sr != null && rel != null) {
         val cur = rel.rows.firstOrNull { it.train == sr.train && it.depPlanned == sr.depPlanned } ?: sr
-        ModalBottomSheet(onDismissRequest = { sheetRow = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = Rb.c.surface3, shape = RoundedCornerShape(topStart = Dim.rSheet, topEnd = Dim.rSheet)) {
+        de.rb64.live.ui.RbSheet(onDismiss = { sheetRow = null }) {
             TripSheet(rel, cur, now, stale, weekday, rideHere(cur), canRide(cur),
                 pinned = cur.train == pinned,
                 onTogglePin = { togglePin(cur) },
                 stand = snap?.let { "Stand ${HM.format(Date(it.fresh))} · ${ageText(it.ageMs(now))}" },
                 refreshing = refreshing, onRefresh = { refresh(ctx) },
+                notifyOn = notifyTick.let { Rules.forTrain(ctx, cur.train, cur.depPlanned, rel.id) != null },
+                onToggleNotify = { toggleNotify(rel, cur) },
+                vehicle = snap?.vehicleFor(cur.train, now),
+                histSeries = HistStore.series(ctx, rel, cur, weekday),
+                pcheck = PCheckStore.forRow(ctx, rel.id, cur),
                 onRide = { sheetRow = null; onStartRide(rel, cur) }, onStopRide = { sheetRow = null; onStopRide() })
         }
     }
@@ -390,10 +424,43 @@ private fun DeparturesScreen(
 
 /* ================================================================== Strecke live */
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun LiveScreen(tick: Int) {
     val ctx = LocalContext.current
     val snap = remember(tick) { Repo.load(ctx) }
     val range = remember(tick) { Repo.liveRange(ctx) }
+    var sheetTrain by remember { mutableStateOf<String?>(null) }
+    var liveNotifyTick by remember { mutableIntStateOf(0) }
+    // angetippter Zug: Detailblatt ab seinem naechsten Halt bis zum Ziel
+    val st = sheetTrain
+    val found = remember(st, tick) { st?.let { snap?.relForTrain(it) } }
+    if (st != null && found != null) {
+        val (rel, row) = found
+        val now = System.currentTimeMillis()
+        val weekday = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK)
+            .let { it != java.util.Calendar.SATURDAY && it != java.util.Calendar.SUNDAY }
+        val pinnedNow = Repo.pinnedTrain(ctx) == row.train
+        de.rb64.live.ui.RbSheet(onDismiss = { sheetTrain = null }) {
+            TripSheet(rel, row, now, snap?.stale(now) == true, weekday, rideHere = false, canRide = false,
+                onRide = {}, onStopRide = {},
+                pinned = pinnedNow,
+                onTogglePin = {
+                    if (pinnedNow) Repo.unpin(ctx) else Repo.pin(ctx, row, rel.id)
+                    Rb64WidgetProvider.updateAll(ctx); Notifier.onPinned(ctx, snap)
+                },
+                stand = snap?.let { "Stand ${HM.format(Date(it.fresh))} · ${ageText(it.ageMs(now))}" },
+                vehicle = snap?.vehicleFor(row.train, now),
+                histSeries = HistStore.series(ctx, rel, row, weekday),
+                pcheck = PCheckStore.forRow(ctx, rel.id, row),
+                notifyOn = liveNotifyTick.let { Rules.forTrain(ctx, row.train, row.depPlanned, rel.id) != null },
+                onToggleNotify = {
+                    val on = Rules.toggleTrain(ctx, rel, row)
+                    Repo.prefs(ctx).edit().putBoolean("n_rules_custom", true).apply()
+                    if (on && Notifier.permitted(ctx)) Settings.load(ctx).copy(enabled = true).save(ctx)
+                    liveNotifyTick++
+                })
+        }
+    }
     Column(Modifier.fillMaxSize()) {
         TopBar("Strecke live", below = {
             Row(Modifier.height(Dim.touch), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dim.s8)) {
@@ -411,7 +478,8 @@ private fun LiveScreen(tick: Int) {
                 val ride = de.rb64.live.ride.RideStore.state.value
                 val mine = Repo.pinnedTrain(ctx) ?: ride?.info?.train
                     ?: Repo.currentRel(ctx, snap)?.let { Repo.visibleRows(it, false).firstOrNull()?.train }
-                LiveMapCard(map, range.first, range.second, snap.crossings(range.first, range.second), mine)
+                LiveMapCard(map, range.first, range.second, snap.crossings(range.first, range.second), mine,
+                    onTrain = { sheetTrain = it })
             }
             // Darstellung der Linie direkt hier umschalten (gleicher Schalter wie in Einstellungen > Darstellung)
             val vis = de.rb64.live.ui.LocalVis.current
@@ -549,7 +617,7 @@ private fun SettingsScreen(onBack: () -> Unit) {
             SectionHeader("Benachrichtigungen")
             val ns = remember { Settings.load(ctx) }
             val nSummary = if (!ns.enabled || !Notifier.permitted(ctx)) "Aus"
-                else "${ns.rels.size} Richtung${if (ns.rels.size == 1) "" else "en"} · " +
+                else Rules.load(ctx).count { it.on }.let { n -> "$n Benachrichtigung${if (n == 1) "" else "en"} · " } +
                     (if (ns.onlyCancel) "nur bei Ausfall" else "ab +${ns.threshold} min") +
                     (if (Repo.pinNotify(ctx)) " · angehefteter Zug" else "")
             RbCard(padding = Dim.s8) {
@@ -569,6 +637,12 @@ private fun SettingsScreen(onBack: () -> Unit) {
                 if (ok) askBackground.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) else setFence(false)
             }
             RbCard(padding = Dim.s8) {
+                var liveOn by remember { mutableStateOf(LiveGps.enabled(ctx)) }
+                ToggleRow("Live-Position teilen",
+                    "Während du mitfährst, sendet die App alle 30 s, wo auf der Strecke dein Zug ist (ohne Koordinaten, " +
+                        "anonym). Dafür siehst du die Züge anderer Mitfahrer live auf der Strecke.", liveOn) { on ->
+                    liveOn = on; LiveGps.setEnabled(ctx, on)
+                }
                 ToggleRow("Am Bahnhof „Ich fahre mit“ vorschlagen",
                     "An den Bahnhöfen deiner Strecken. Braucht Standort „Immer zulassen“. Der Standort wird dabei nicht gespeichert.",
                     fenceOn) { on ->
@@ -675,46 +749,27 @@ private fun NotifySettingsScreen(onBack: () -> Unit) {
     }
     val muted = Rb.c.muted
 
-    /** Beginn oder Ende des Zeitfensters einer Strecke per Uhr waehlen. */
-    fun pickTime(id: String, start: Boolean) {
-        val w = s.windows[id] ?: return
-        val cur = if (start) w.from else w.to
-        TimePickerDialog(ctx, { _, h, m ->
-            val v = h * 60 + m
-            val nw = if (start) Window(v, maxOf(v, w.to)) else Window(minOf(w.from, v), v)
-            upd(s.copy(windows = s.windows + (id to nw)))
-        }, cur / 60, cur % 60, true).apply { setTitle(if (start) "Benachrichtigen ab" else "Benachrichtigen bis") }.show()
-    }
-
     Column(Modifier.fillMaxSize()) {
         TopBar("Benachrichtigungen", onBack = onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Dim.s16),
             verticalArrangement = Arrangement.spacedBy(Dim.s8)) {
 
-            SectionHeader("Deine Strecken")
             RbCard(padding = Dim.s8) {
-                ToggleRow("Benachrichtigungen", "Nur für deine Strecken in ihrem Zeitfenster, kurz vor Abfahrt", s.enabled) { on ->
+                ToggleRow("Benachrichtigungen", "Kurz vor Abfahrt, wenn sich etwas ändert", s.enabled) { on ->
                     if (on && !Notifier.permitted(ctx)) askPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                     else upd(s.copy(enabled = on))
                 }
             }
-            Repo.directedRels(ctx).forEach { (id, name) ->
-                val isMuted = remember(muteTick) { Notifier.isMuted(ctx, id) }
-                val on = s.enabled && id in s.rels
-                val w = s.windows[id]
-                RbCard(padding = Dim.s12) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(name, style = Ts.textStrong, color = if (s.enabled) Rb.c.onSurface else muted, modifier = Modifier.weight(1f))
-                        Switch(checked = id in s.rels, enabled = s.enabled,
-                            onCheckedChange = { v -> upd(s.copy(rels = if (v) s.rels + id else s.rels - id)) })
-                    }
-                    if (w != null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dim.s8)) {
-                        TimeChip("von", w.from, on) { pickTime(id, true) }
-                        TimeChip("bis", w.to, on) { pickTime(id, false) }
-                    }
-                    if (isMuted) Text("Heute stumm („Zug genommen“) · aufheben", style = Ts.smallStrong, color = Rb.c.primary,
-                        modifier = Modifier.heightIn(min = Dim.touch).clickable { Notifier.unmute(ctx, id); muteTick++ }.padding(top = Dim.s12))
-                }
+            SectionHeader("Deine Benachrichtigungen")
+            Text("Für ganze Strecken in einem Zeitfenster oder für einzelne Züge (im Detailblatt eines Zugs: „Bei Verspätung melden“). " +
+                "Antippen zum Bearbeiten.", style = Ts.small, color = muted)
+            RulesEditor(enabled = s.enabled)
+            // heute per „Zug genommen“ stumm geschaltete Richtungen
+            val mutedRels = remember(muteTick) { Rules.load(ctx).map { it.relId }.distinct().filter { Notifier.isMuted(ctx, it) } }
+            mutedRels.forEach { id ->
+                val (a, b) = Snapshot.parseRelId(id) ?: return@forEach
+                Text("${Line.name(a)} → ${Line.name(b)} heute stumm („Zug genommen“) · aufheben", style = Ts.smallStrong, color = Rb.c.primary,
+                    modifier = Modifier.heightIn(min = Dim.touch).clickable { Notifier.unmute(ctx, id); muteTick++ }.padding(top = Dim.s12))
             }
 
             SectionHeader("Wann melden")
@@ -722,7 +777,6 @@ private fun NotifySettingsScreen(onBack: () -> Unit) {
                 ToggleRow("Nur bei Ausfall", "Verspätungen ignorieren", s.onlyCancel, s.enabled) { upd(s.copy(onlyCancel = it)) }
                 SliderRow("Ab Verspätung", "+${s.threshold} min", s.threshold, 2..20, s.enabled && !s.onlyCancel) { upd(s.copy(threshold = it)) }
                 SliderRow("Nur vor Abfahrt", "${s.leadMin} min vorher", s.leadMin, 10..120, s.enabled) { upd(s.copy(leadMin = it)) }
-                ToggleRow("Nur Montag bis Freitag", null, s.weekdaysOnly, s.enabled) { upd(s.copy(weekdaysOnly = it)) }
                 ToggleRow("Vibration", "Sonst lautlos (nur in der Leiste)", s.vibrate, s.enabled) { upd(s.copy(vibrate = it)) }
             }
 
@@ -822,7 +876,7 @@ internal fun StationPicker(label: String?, seq: Int, exclude: Int? = null, onHea
 
 /** Knopf mit Uhrzeit fuer das Zeitfenster ("von 06:00"). */
 @Composable
-private fun TimeChip(label: String, minutes: Int, enabled: Boolean, onClick: () -> Unit) {
+internal fun TimeChip(label: String, minutes: Int, enabled: Boolean, onClick: () -> Unit) {
     val fg = if (enabled) Rb.c.primary else Rb.c.muted
     Box(Modifier.height(Dim.touch).clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
         Row(Modifier.clip(RoundedCornerShape(Dim.rChip)).background(if (enabled) Rb.c.primaryTint else Rb.c.background)

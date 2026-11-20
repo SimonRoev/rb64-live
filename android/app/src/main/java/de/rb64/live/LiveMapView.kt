@@ -6,6 +6,10 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -113,7 +117,10 @@ object LineGeo {
  * Dazu Minikarte mit der echten Geometrie, Kreuzungshinweise und "dein Zug".
  */
 @Composable
-fun LiveMapCard(map: LiveMap, lo: Int, hi: Int, crossings: List<Crossing>, myTrain: String?) {
+fun LiveMapCard(map: LiveMap, lo: Int, hi: Int, crossings: List<Crossing>, myTrain: String?,
+                onTrain: ((String) -> Unit)? = null) {
+    // Trefferflaechen der Zuege aus dem letzten Zeichnen (Punkt + Kaertchen) fuer das Antippen
+    val hits = remember { mutableListOf<Pair<Rect, String>>() }
     val ctx = LocalContext.current
     remember { LineGeo.load(ctx) }
     val c = Rb.c
@@ -179,7 +186,9 @@ fun LiveMapCard(map: LiveMap, lo: Int, hi: Int, crossings: List<Crossing>, myTra
         }
 
         val crossSeqs = crossings.map { it.seq }.toSet()
-        Canvas(Modifier.fillMaxWidth().height(heightDp.dp).semantics {
+        Canvas(Modifier.fillMaxWidth().height(heightDp.dp).pointerInput(onTrain) {
+            if (onTrain != null) detectTapGestures { p -> hits.lastOrNull { it.first.contains(p) }?.second?.let(onTrain) }
+        }.semantics {
             contentDescription = "Linie ${Line.name(lo)} bis ${Line.name(hi)}. " +
                 map.trains.joinToString { "${it.train} nach ${if (it.toEnschede) "Enschede" else "Münster"}" + (if (it.delay >= 1) " plus ${it.delay}" else "") }
         }) {
@@ -230,6 +239,7 @@ fun LiveMapCard(map: LiveMap, lo: Int, hi: Int, crossings: List<Crossing>, myTra
 
             // Zuege: Punkt auf dem Band + Kaertchen in der Spalte ihrer Richtung (von oben nach unten, ohne Ueberlappung)
             val lastBottom = floatArrayOf(-1e9f, -1e9f)
+            hits.clear()
             map.trains.sortedBy { yOfDist(LineGeo.distAt(anim[it.train] ?: it.seq)) }.forEach { t ->
                 val o = pos(LineGeo.distAt(anim[t.train] ?: t.seq))
                 val col = when { t.bus -> c.graphic; t.delay >= 6 -> c.bad; t.delay >= 3 -> c.warn; else -> c.primary }
@@ -245,11 +255,15 @@ fun LiveMapCard(map: LiveMap, lo: Int, hi: Int, crossings: List<Crossing>, myTra
                 var y0 = o.y - h / 2
                 if (y0 < lastBottom[k2] + 4 * px) y0 = lastBottom[k2] + 4 * px
                 lastBottom[k2] = y0 + h
+                hits += Rect(o.x - 18 * px, o.y - 18 * px, o.x + 18 * px, o.y + 18 * px) to t.train
+                hits += Rect(x0, y0, x0 + colW, y0 + h) to t.train
                 drawLine(col.copy(alpha = 0.5f), Offset(o.x + 10 * px, o.y), Offset(x0, y0 + h / 2), 2 * px)
                 drawRoundRect(if (mine) c.primaryTint else c.surface3, Offset(x0, y0), Size(colW, h), CornerRadius(8 * px))
                 drawRoundRect(col, Offset(x0, y0), Size(colW, h), CornerRadius(8 * px), style = Stroke((if (mine) 2.5f else 2f) * px))
                 val name = tm.measure(if (t.bus) "Bus" else t.train, Ts.smallStrong.copy(color = c.onSurface))
                 drawText(name, topLeft = Offset(x0 + 8 * px, y0 + (h - name.size.height) / 2))
+                // Live vom Handy eines Mitfahrers: kleiner gefuellter Punkt rechts neben der Zugnummer
+                if (t.gps) drawCircle(c.primary, 4 * px, Offset(x0 + 8 * px + name.size.width + 8 * px, y0 + h / 2))
                 if (t.delay >= 1) {
                     val dl = tm.measure("+${t.delay}", Ts.smallBold.copy(color = if (t.delay >= 3) col else c.muted))
                     drawText(dl, topLeft = Offset(x0 + colW - 8 * px - dl.size.width, y0 + (h - dl.size.height) / 2))
@@ -257,7 +271,8 @@ fun LiveMapCard(map: LiveMap, lo: Int, hi: Int, crossings: List<Crossing>, myTra
             }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = Dim.s16, vertical = Dim.s8)) {
-            Text(if (myTrain != null) "Ring = dein Zug · Quadrat = Kreuzungshalt" else "Quadrat = Kreuzungshalt",
+            Text((if (myTrain != null) "Ring = dein Zug · Quadrat = Kreuzungshalt" else "Quadrat = Kreuzungshalt") +
+                    (if (map.trains.any { it.gps }) " · Punkt = live per GPS" else ""),
                 style = Ts.small, color = c.muted, modifier = Modifier.weight(1f))
             if (vis.mapMini) Text("© OpenStreetMap", style = Ts.small, color = c.muted)
         }
@@ -272,14 +287,16 @@ fun LiveMapCard(map: LiveMap, lo: Int, hi: Int, crossings: List<Crossing>, myTra
             val from = Line.name(if (t.toEnschede) s0 else s1); val to = Line.name(if (t.toEnschede) s1 else s0)
             "zwischen $from und $to"
         }
-        Row(Modifier.fillMaxWidth().heightIn(min = Dim.row).padding(horizontal = Dim.s16, vertical = Dim.s8),
+        Row(Modifier.fillMaxWidth().heightIn(min = Dim.row)
+            .then(if (onTrain != null) Modifier.clickable { onTrain(t.train) } else Modifier)
+            .padding(horizontal = Dim.s16, vertical = Dim.s8),
             verticalAlignment = Alignment.CenterVertically) {
             Icon(if (t.toEnschede) RbIcons.chevronUp else RbIcons.chevronDown, null, tint = c.muted, modifier = Modifier.size(Dim.icon))
             Spacer(Modifier.width(Dim.s12))
             Column(Modifier.weight(1f)) {
                 Text("${if (t.bus) "Ersatzbus" else t.train} nach ${if (t.toEnschede) "Enschede" else "Münster"}" +
                     (if (t.train == myTrain) " · dein Zug" else ""), style = Ts.textStrong)
-                Text(where, style = Ts.small, color = c.muted)
+                Text(where + if (t.gps) " · live per GPS" else "", style = Ts.small, color = if (t.gps) c.primary else c.muted)
             }
             when {
                 t.bus -> {}

@@ -9,6 +9,10 @@ import de.rb64.live.widget.Rb64WidgetProvider
 class PushService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
+        if (message.data["type"] == "live") {          // Live-Positionen von Mitfahrern (nur an Teilende)
+            LiveGps.onPush(applicationContext, message.data["l"])
+            return
+        }
         if (message.data["type"] == "msg") {
             Notifier.showMessage(applicationContext, message.data["t"] ?: "RB64 Live", message.data["b"] ?: "")
             return
@@ -18,6 +22,7 @@ class PushService : FirebaseMessagingService() {
         val snap = runCatching { Repo.save(applicationContext, json); Repo.parse(json) }
             .onFailure { Log.w("RB64", "Daten nicht lesbar", it) }.getOrNull() ?: return
         Rb64WidgetProvider.updateAll(applicationContext)
+        runCatching { PCheckStore.record(applicationContext, snap) }   // Prognose-Check: Verlauf mitschreiben
         Notifier.onPayload(applicationContext, snap)
         Notifier.onPinned(applicationContext, snap)
         de.rb64.live.ride.RideService.refresh(applicationContext)
