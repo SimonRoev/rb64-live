@@ -115,6 +115,14 @@ object Fences {
         if (options.isEmpty()) return
         p.edit().putLong("prompt_$station", now).apply()
 
+        // angehefteter Zug faehrt hier ab und steht ohnehin als Live Update da: keine zweite Meldung,
+        // sondern das Live Update einmal hervorheben und "Los, ich fahre mit" sofort anbieten
+        if (pinned != null && Repo.pinLock(ctx)) {
+            ctx.getSystemService(NotificationManager::class.java).cancel(RideService.PROMPT_NOTIF_ID)
+            de.rb64.live.Notifier.onPinned(ctx, snap, atStation = true)
+            return
+        }
+
         val (rel0, row0) = options.first()
         val b = Notification.Builder(ctx, RideService.CH_PROMPT)
             .setSmallIcon(R.drawable.ic_notify)

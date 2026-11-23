@@ -98,6 +98,25 @@ data class MapTrain(val train: String, val toEnschede: Boolean, val seq: Double,
                     val gps: Boolean = false)
 data class LiveMap(val stations: List<MapStation>, val trains: List<MapTrain>)
 
+/** Abschnitt der Linie, der fuer einen Zug noetig ist: wo er gerade ist (bzw. startet), dein Einstieg und Ziel.
+ *  Fuer die grosse Karte aus dem Detailblatt - aendert nichts an den Einstellungen der Live-Strecke. */
+fun Snapshot.mapRangeFor(train: String, rel: Rel): Pair<Int, Int> {
+    val t = trips.firstOrNull { it.train == train }
+    val seqs = listOfNotNull(Line.seqOf(rel.from), Line.seqOf(rel.to)).toMutableList()
+    if (t != null) {
+        if (t.pos >= 0) { seqs += kotlin.math.floor(t.pos).toInt(); seqs += kotlin.math.ceil(t.pos).toInt() }
+        else {
+            t.stops.firstOrNull()?.seq?.let { seqs += it }
+            // noch nicht unterwegs: das Fahrzeug, das gleich als dieser Zug faehrt, mit auf die Karte
+            t.link?.let { l -> trips.firstOrNull { it.train == l.train }?.takeIf { it.pos >= 0 }?.let { v ->
+                seqs += kotlin.math.floor(v.pos).toInt(); seqs += kotlin.math.ceil(v.pos).toInt() } }
+        }
+    }
+    val lo = (seqs.minOrNull() ?: 1).coerceIn(1, 13)
+    val hi = (seqs.maxOrNull() ?: 14).coerceIn(lo + 1, 14)
+    return lo to hi
+}
+
 /** Fahrt eines Zugs ab seinem naechsten Halt bis zum Ziel (fuer das Detailblatt aus "Strecke live"). */
 fun Snapshot.relForTrain(train: String, now: Long = System.currentTimeMillis()): Pair<Rel, Row>? {
     val t = trips.firstOrNull { it.train == train } ?: return null
@@ -395,11 +414,16 @@ object Repo {
         return if (System.currentTimeMillis() < p.getLong("pin_until", 0)) p.getString("pin_train", null) else null
     }
 
-    fun pin(ctx: Context, r: Row, relId: String) =
+    fun pin(ctx: Context, r: Row, relId: String) {
         prefs(ctx).edit().putString("pin_train", r.train).putString("pin_rel", relId)
             .putLong("pin_until", r.arrEpoch + 30 * 60_000L).remove("pin_last_delay").apply()
+        Cloud.setPinUntil(ctx, r.arrEpoch + 30 * 60_000L)
+    }
 
-    fun unpin(ctx: Context) = prefs(ctx).edit().remove("pin_train").remove("pin_until").remove("pin_rel").apply()
+    fun unpin(ctx: Context) {
+        prefs(ctx).edit().remove("pin_train").remove("pin_until").remove("pin_rel").apply()
+        Cloud.setPinUntil(ctx, 0L)
+    }
 
     fun pinnedRelId(ctx: Context): String? = prefs(ctx).getString("pin_rel", null)
 
@@ -459,6 +483,7 @@ val VISUAL_OPTIONS = listOf(
     Triple("animations", "Sanfte Bewegungen", "Züge gleiten bei neuen Daten an ihre Position"),
     Triple("widget_strip", "Schattenstreifen im Widget", "Unter der Kopfleiste des Widgets"),
     Triple("big_time", "Große Abfahrtszeit", "Die Zeit im Kasten oben deutlich größer, gut lesbar im Gehen"),
+    Triple("daytime_header", "Kopfzeile nach Tageszeit", "Morgens warm, abends violett, nachts dunkel mit Sternen – nach Sonnenauf- und -untergang in Münster"),
 )
 
 /** Effekte, die standardmaessig aus sind (alle anderen sind an). */
@@ -478,6 +503,7 @@ class Visuals(private val m: Map<String, Boolean> = emptyMap()) {
     val animations get() = on("animations")
     val widgetStrip get() = on("widget_strip")
     val bigTime get() = on("big_time")
+    val daytimeHeader get() = on("daytime_header")
     val countOn get() = VISUAL_OPTIONS.count { on(it.first) }
 }
 

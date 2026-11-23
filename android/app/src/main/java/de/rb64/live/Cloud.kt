@@ -46,7 +46,7 @@ object Cloud {
     }
 
     /** Aufgezeichnete Fahrt hochladen: rides/{rideId} (komplette Fahrt als JSON-Text). */
-    fun uploadRide(ctx: Context, ride: de.rb64.live.ride.RideState) {
+    fun uploadRide(ctx: Context, ride: de.rb64.live.ride.RideState, onDone: (() -> Unit)? = null) {
         withUser { uid ->
             val i = ride.info
             FirebaseFirestore.getInstance().collection("rides").document(i.id).set(mapOf(
@@ -59,7 +59,8 @@ object Cloud {
                 Log.i(TAG, "Fahrt hochgeladen (${ride.points.size} Punkte)")
                 val p = Repo.prefs(ctx)
                 if (p.getString("ride_upload_pending", null) == i.id) p.edit().remove("ride_upload_pending").apply()
-            }.addOnFailureListener { Log.w(TAG, "Fahrt nicht hochgeladen (wird beim nächsten Start erneut versucht)", it) }
+                onDone?.invoke()
+            }.addOnFailureListener { Log.w(TAG, "Fahrt nicht hochgeladen (wird beim nächsten Start erneut versucht)", it); onDone?.invoke() }
         }
     }
 
@@ -105,6 +106,17 @@ object Cloud {
             withUser { uid ->
                 doc(uid).set(mapOf("token" to token, "liveShare" to on, "updated" to FieldValue.serverTimestamp()), SetOptions.merge())
                     .addOnFailureListener { Log.w(TAG, "Live-Einstellung nicht gespeichert", it) }
+            }
+        }
+    }
+
+    /** Bis wann ein Zug angeheftet ist (0 = keiner). Dann schickt die VM neue Daten mit hoher Prioritaet,
+     *  damit Meldungen auch bei gesperrtem Handy sofort kommen. Welcher Zug, erfaehrt der Server nicht. */
+    fun setPinUntil(ctx: Context, until: Long) {
+        FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+            withUser { uid ->
+                doc(uid).set(mapOf("token" to token, "pinUntil" to until, "updated" to FieldValue.serverTimestamp()), SetOptions.merge())
+                    .addOnFailureListener { Log.w(TAG, "Anheften nicht gemeldet", it) }
             }
         }
     }

@@ -1,5 +1,8 @@
 package de.rb64.live
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.fillMaxSize
 import android.content.Context
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
@@ -340,3 +343,40 @@ private fun DrawScope.drawChevron(p: Offset, up: Boolean, color: Color, s: Float
     drawLine(color, Offset(p.x - s, p.y - dy * s / 2), tip, 2.dp.toPx(), cap = StrokeCap.Round)
     drawLine(color, Offset(p.x + s, p.y - dy * s / 2), tip, 2.dp.toPx(), cap = StrokeCap.Round)
 }
+
+
+/** Vollbild "Strecke live" fuer genau diesen Zug (aus dem Detailblatt). Eigener Abschnitt, Einstellungen bleiben. */
+@Composable
+fun TrainMapDialog(snap: Snapshot, train: String, lo: Int, hi: Int, onClose: () -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onClose,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Column(Modifier.fillMaxSize().background(Rb.c.background)) {
+            de.rb64.live.ui.TopBar("RB64 $train live", onBack = onClose, below = {
+                Text("${Line.name(lo)} – ${Line.name(hi)}", style = Ts.text, color = Rb.c.onHeader,
+                    modifier = Modifier.padding(start = Dim.s12, bottom = Dim.s4))
+            })
+            Column(Modifier.weight(1f).verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(Dim.s16),
+                verticalArrangement = Arrangement.spacedBy(Dim.s8)) {
+                // Zug noch nicht unterwegs: stattdessen das Fahrzeug markieren, das gleich als dieser Zug faehrt
+                val t = snap.trips.firstOrNull { it.train == train }
+                val vehicle = t?.takeIf { it.pos < 0 }?.link?.let { l -> snap.trips.firstOrNull { it.train == l.train && it.pos >= 0 } }
+                val mark = if (t != null && t.pos < 0 && vehicle != null) vehicle.train else train
+                if (t != null && t.pos < 0) {
+                    val start = t.stops.firstOrNull()
+                    val dep = start?.pdp?.let { HM_MAP.format(java.util.Date((snap.base + it + (start.ddp ?: 0)) * 60_000L)) }
+                    RbCard {
+                        Text("Noch nicht unterwegs", style = Ts.textStrong)
+                        Text(listOfNotNull(dep?.let { "fährt um $it ab ${start?.seq?.let { s -> Line.name(s) }}" },
+                            vehicle?.let { "das Fahrzeug kommt als ${it.train} – auf der Karte mit Ring markiert" }).joinToString(" · "),
+                            style = Ts.small, color = Rb.c.muted)
+                    }
+                }
+                val map = snap.liveMap(lo, hi)
+                if (map.stations.size < 2) RbCard { Text("Noch keine Streckendaten", style = Ts.text, color = Rb.c.muted) }
+                else LiveMapCard(map, lo, hi, snap.crossings(lo, hi), mark)
+            }
+        }
+    }
+}
+
+private val HM_MAP = java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY)

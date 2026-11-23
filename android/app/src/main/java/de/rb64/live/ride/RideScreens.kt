@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
@@ -160,7 +161,8 @@ fun SummaryScreen(s: RideState, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val deps = Analyzer.departures(s.events)
     val arrTo = s.events.lastOrNull { it.station == s.info.to }?.arr
-    val dur = ((s.ended ?: s.started) - s.started) / 60_000
+    // Fahrzeit wie auf der Fahrkarte (Abfahrt bis Ankunft); nur ohne Messung die Dauer der Aufzeichnung
+    val dur = s.rideMinutes()?.toLong() ?: (((s.ended ?: s.started) - s.started) / 60_000)
     var askDelete by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     // noch nicht bestaetigt hochgeladen?
     val uploadPending = de.rb64.live.Repo.prefs(ctx).getString("ride_upload_pending", null) == s.info.id
@@ -175,6 +177,10 @@ fun SummaryScreen(s: RideState, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         TopBar("Fahrt vom ${SimpleDateFormat("dd.MM.", Locale.GERMANY).format(Date(s.started))}", onBack = onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Dim.s16), verticalArrangement = Arrangement.spacedBy(Dim.s8)) {
+            // Sammelbare Fahrkarte (nur hier und im Stempelheft)
+            val hist by RideStore.history.collectAsState()
+            val ticket = remember(s.info.id, hist.size) { Tickets.of(ctx, s, hist) }
+            TicketCard(ticket, Modifier.fillMaxWidth().padding(top = Dim.s8))
             RbCard {
                 Text("${s.info.train} ${s.info.from} → ${s.info.to}", style = Ts.title)
                 s.info.corrected?.let {
@@ -244,13 +250,15 @@ private val DAY = SimpleDateFormat("EE dd.MM.", Locale.GERMANY)
 
 /** Alle gespeicherten Fahrten, neueste zuerst; oben eine kleine Bilanz. Antippen oeffnet die Auswertung. */
 @Composable
-fun RideListScreen(rides: List<RideMeta>, onOpen: (String) -> Unit, onGoDepartures: () -> Unit) {
+fun RideListScreen(rides: List<RideMeta>, onOpen: (String) -> Unit, onGoDepartures: () -> Unit, onOpenBook: () -> Unit = {}) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     Column(Modifier.fillMaxSize()) {
         TopBar("Fahrten")
         androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(Dim.s16),
             verticalArrangement = Arrangement.spacedBy(Dim.s8)) {
+            // fehlende Berechtigungen fuer Fahrten (verschwindet, sobald alles da ist)
+            item { RidePermissionsCard() }
             if (rides.isEmpty()) item {
                 RbCard {
                     Text("Noch keine Fahrt aufgezeichnet", style = Ts.textStrong)
@@ -273,6 +281,19 @@ fun RideListScreen(rides: List<RideMeta>, onOpen: (String) -> Unit, onGoDepartur
                     }
                 }
             }
+            // Stempelheft: ein Stempel je Bahnhof, an dem du mitgefahren bist
+            if (rides.isNotEmpty()) item {
+                val got = rides.flatMap { Tickets.lineBetween(it.from, it.to) }.toSet().size
+                RbCard(onClick = onOpenBook, padding = Dim.s12) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f).padding(start = Dim.s4)) {
+                            Text("Stempelheft", style = Ts.textStrong)
+                            Text("$got von ${Stations.all.size} Bahnhöfen gestempelt", style = Ts.small, color = Rb.c.muted)
+                        }
+                        Icon(RbIcons.arrowRight, null, tint = Rb.c.muted, modifier = Modifier.padding(start = Dim.s8).size(Dim.iconSmall))
+                    }
+                }
+            }
             // Prognose-Check: wie lagen Prognose und DB bei deinen angehefteten Zuegen?
             val checks = de.rb64.live.PCheckStore.done(ctx)
             if (checks.isNotEmpty()) {
@@ -287,7 +308,7 @@ fun RideListScreen(rides: List<RideMeta>, onOpen: (String) -> Unit, onGoDepartur
                         Column(Modifier.weight(1f).padding(start = Dim.s4)) {
                             Text("${m.from} → ${m.to}", style = Ts.textStrong)
                             Text("${DAY.format(Date(m.started))} · ${HM.format(Date(m.started))} · ${m.train} · " +
-                                "${(m.ended - m.started) / 60_000} min" + (if (m.km >= 0.5) " · %.1f km".format(m.km) else ""),
+                                "${m.minutes} min" + (if (m.km >= 0.5) " · %.1f km".format(m.km) else ""),
                                 style = Ts.small, color = Rb.c.muted)
                         }
                         val d = m.arrDelta

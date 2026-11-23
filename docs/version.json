@@ -1,10 +1,10 @@
 {
-  "versionCode": 13,
-  "versionName": "0.13",
-  "date": "2026-11-20",
+  "versionCode": 14,
+  "versionName": "0.14",
+  "date": "2026-11-23",
   "url": "https://simonroev.github.io/rb64-live/download/rb64-live.apk",
   "page": "https://simonroev.github.io/rb64-live/#download",
-  "sha256": "0a3ec587ef9f04eb78883c452ee4e29220571f6f7a90db5d996812303cdf8c2d",
-  "size": 30464317,
-  "notes": "Live-Position teilen, Woher kommt dein Zug, Verlauf je Abfahrt, Prognose-Check, Anheften als Hauptknopf"
+  "sha256": "23db283f7542ab489c8dd68ec1c94ba7f388ece85bf5d894b0d0d198ff41f7c0",
+  "size": 30808381,
+  "notes": "Fahrkarte und Stempelheft nach jeder Fahrt, Strecke eines Zuges ansehen, Kopfzeile nach Tageszeit, angehefteter Zug: Mitfahren erst kurz vor Abfahrt"
 }

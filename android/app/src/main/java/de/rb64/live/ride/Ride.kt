@@ -25,6 +25,8 @@ data class RideInfo(
     val stops: List<String>, val planned: Map<String, String>, val dbExpected: Map<String, String>,
     /** Urspruenglich gewaehlter Zug, falls die gemessene Abfahrt zu einem anderen passte. */
     val corrected: String? = null,
+    /** Wetterwarnungen, die waehrend der Fahrt galten (fuer die Fahrkarte). */
+    val weather: List<String> = emptyList(),
 )
 
 data class RideState(
@@ -148,7 +150,19 @@ object Analyzer {
 data class RideMeta(
     val id: String, val train: String, val from: String, val to: String,
     val started: Long, val ended: Long, val arrDelta: Int?, val km: Double, val tags: Int,
-)
+    /** Fahrzeit von gemessener Abfahrt bis Ankunft (wie auf der Fahrkarte); null bei aelteren Eintraegen. */
+    val rideMin: Int? = null,
+) {
+    /** Fahrzeit, sonst Dauer der Aufzeichnung. */
+    val minutes: Long get() = rideMin?.toLong() ?: ((ended - started) / 60_000)
+}
+
+/** Fahrzeit Abfahrt -> Ankunft in Minuten (wie auf der Fahrkarte), null wenn nicht gemessen. */
+fun RideState.rideMinutes(): Int? {
+    val dep = Analyzer.departures(events)[info.from] ?: events.firstOrNull { it.station == info.from }?.dep
+    val arr = events.lastOrNull { it.station == info.to }?.arr
+    return if (dep != null && arr != null && arr > dep) ((arr - dep) / 60_000).toInt() else null
+}
 
 object RideStore {
     private val _state = MutableStateFlow<RideState?>(null)
@@ -186,6 +200,12 @@ object RideStore {
         _history.value = list.sortedByDescending { it.started }
         saveIndex(ctx)
         _last.value = _history.value.firstOrNull()?.let { load(ctx, it.id) }
+        // einmalig: Fahrzeit (Abfahrt -> Ankunft) fuer aeltere Eintraege nachtragen, im Hintergrund
+        if (list.any { it.rideMin == null }) Thread {
+            val fixed = list.associate { m -> m.id to (m.rideMin ?: load(ctx, m.id)?.rideMinutes()) }
+            _history.value = _history.value.map { m -> if (m.rideMin == null) m.copy(rideMin = fixed[m.id]) else m }
+            saveIndex(ctx)
+        }.start()
     }
 
     /** Ganze Fahrt mit Messpunkten laden. */
@@ -224,19 +244,25 @@ object RideStore {
             android.location.Location.distanceBetween(pts[i - 1].lat, pts[i - 1].lon, pts[i].lat, pts[i].lon, d); m += d[0]
         }
         return RideMeta(s.info.id, s.info.train, s.info.from, s.info.to, s.started, s.ended ?: s.started,
-            Analyzer.deltaMin(s.info.planned[s.info.to], arr), m / 1000, s.tags.size)
+            Analyzer.deltaMin(s.info.planned[s.info.to], arr), m / 1000, s.tags.size, s.rideMinutes())
     }
 
     private fun metaJson(m: RideMeta) = JSONObject().apply {
         put("id", m.id); put("train", m.train); put("from", m.from); put("to", m.to); put("started", m.started); put("ended", m.ended)
         m.arrDelta?.let { put("arrDelta", it) }; put("km", m.km); put("tags", m.tags)
+        m.rideMin?.let { put("rideMin", it) }
     }
 
     private fun metaFrom(o: JSONObject) = RideMeta(o.getString("id"), o.getString("train"), o.getString("from"), o.getString("to"),
-        o.getLong("started"), o.getLong("ended"), if (o.has("arrDelta")) o.getInt("arrDelta") else null, o.optDouble("km", 0.0), o.optInt("tags"))
+        o.getLong("started"), o.getLong("ended"), if (o.has("arrDelta")) o.getInt("arrDelta") else null, o.optDouble("km", 0.0), o.optInt("tags"),
+        if (o.has("rideMin")) o.getInt("rideMin") else null)
+
+    /** Aktuelle Wetterwarnungen aus den Hinweisen des Servers. */
+    private fun weatherNow(ctx: Context): List<String> =
+        de.rb64.live.Repo.load(ctx)?.notes?.filter { it.startsWith("Wetterwarnung") }?.map { it.removePrefix("Wetterwarnung:").trim() } ?: emptyList()
 
     fun start(ctx: Context, info: RideInfo) {
-        val s = RideState(info, System.currentTimeMillis())
+        val s = RideState(info.copy(weather = runCatching { weatherNow(ctx) }.getOrDefault(emptyList())), System.currentTimeMillis())
         _state.value = s
         save(ctx, s)
     }
@@ -250,7 +276,8 @@ object RideStore {
 
     fun finish(ctx: Context): RideState? {
         val s = _state.value ?: return null
-        val done = s.copy(ended = System.currentTimeMillis(),
+        val wx = (s.info.weather + runCatching { weatherNow(ctx) }.getOrDefault(emptyList())).distinct()
+        val done = s.copy(info = s.info.copy(weather = wx), ended = System.currentTimeMillis(),
             events = Analyzer.withArrival(Analyzer.events(s.points), s.points, s.info.to))
         rideFile(ctx, done.info.id).writeText(toJson(done).toString())
         _history.value = (listOf(meta(done)) + _history.value.filter { it.id != done.info.id }).take(MAX_RIDES)
@@ -281,6 +308,7 @@ object RideStore {
             put("stops", JSONArray(i.stops)); put("planned", JSONObject(i.planned as Map<*, *>))
             put("dbExpected", JSONObject(i.dbExpected as Map<*, *>))
             i.corrected?.let { put("corrected", it) }
+            if (i.weather.isNotEmpty()) put("weather", JSONArray(i.weather))
         })
         put("started", s.started); s.ended?.let { put("ended", it) }
         put("points", JSONArray().apply { s.points.forEach { p -> put(JSONArray(listOf(p.t, p.lat, p.lon, p.speed.toDouble(), p.acc.toDouble()))) } })
@@ -299,6 +327,7 @@ object RideStore {
             i.getJSONArray("stops").let { a -> List(a.length()) { a.getString(it) } },
             strMap(i.optJSONObject("planned")), strMap(i.optJSONObject("dbExpected")),
             if (i.has("corrected")) i.getString("corrected") else null,
+            i.optJSONArray("weather")?.let { a -> List(a.length()) { a.getString(it) } } ?: emptyList(),
         )
         val pts = o.optJSONArray("points")?.let { a -> List(a.length()) { k -> a.getJSONArray(k).let {
             Pt(it.getLong(0), it.getDouble(1), it.getDouble(2), it.getDouble(3).toFloat(), it.getDouble(4).toFloat()) } } } ?: emptyList()

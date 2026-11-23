@@ -16,7 +16,8 @@ object Backup {
 
     /** Nicht sichern: Caches, Geraete-Bindung, Tageszustaende. */
     private fun skip(key: String) = key in setOf("payload", "token_sent", "ride_upload_pending", "ride_ended", "refreshing",
-        "past_until", "feedback_times", "pin_train", "pin_rel", "pin_until", "pin_last_delay") ||
+        "past_until", "feedback_times", "pin_train", "pin_rel", "pin_until", "pin_last_delay",
+        "news_seen") ||     // "Neu in" haengt am Geraet, nicht an der Sicherung
         key.startsWith("prompt_") || key.startsWith("mute_") || key.startsWith("refresh")
 
     fun export(ctx: Context): String {

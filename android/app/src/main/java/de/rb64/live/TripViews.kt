@@ -315,6 +315,7 @@ fun TripSheet(
     stand: String? = null, refreshing: Boolean = false, onRefresh: (() -> Unit)? = null,
     notifyOn: Boolean = false, onToggleNotify: (() -> Unit)? = null,
     vehicle: VehicleView? = null, histSeries: HistSeries? = null, pcheck: PCheck? = null,
+    onShowMap: (() -> Unit)? = null,
 ) {
     // Fahrzeug noch unterwegs zur Wende: dann steht der Zug nicht schon am Einstieg
     @Suppress("NAME_SHADOWING") val r = if (vehicle != null && vehicle.state != VehicleView.State.ARRIVED && r.marker == 0.0) r.copy(marker = -1.0) else r
@@ -340,6 +341,8 @@ fun TripSheet(
                     "an ${rel.to} ${r.arrExpected}" + (r.arrPlatform?.let { ", Gl. $it" } ?: ""),
                     r.platform?.let { "ab Gl. $it" }).joinToString(" · "),
                 style = Ts.text, color = Rb.c.muted)
+            if (onShowMap != null && !r.cancelled) de.rb64.live.ui.TextAction("Auf der Strecke ansehen", RbIcons.route, onShowMap,
+                Modifier.padding(top = 2.dp).offset(x = (-8).dp))
         }
     }) {
         // nach der Abfahrt: wie lagen Prognose und DB?
@@ -365,7 +368,7 @@ fun TripSheet(
             else r.histLong(weekday)?.let { Text(it, style = Ts.small, color = Rb.c.muted) }
         }
         if (stale) de.rb64.live.ui.Banner("Daten veraltet – Zeiten können nicht mehr stimmen")
-        if (vehicle != null && !r.cancelled) VehicleBlock(vehicle, r.train, rel.from, r.depExpected)
+        if (vehicle != null && !r.cancelled) VehicleBlock(vehicle, r.train, rel.from, r.depExpected, myDelay = r.depDelay)
 
         // Zuglauf (Zeilen 48)
         if (r.stops.isNotEmpty() && !r.cancelled) Column {

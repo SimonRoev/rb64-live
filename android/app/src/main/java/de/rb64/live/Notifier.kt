@@ -147,7 +147,8 @@ object Notifier {
         ctx.getSystemService(NotificationManager::class.java).cancel(PIN_ID)
     }
 
-    fun onPinned(ctx: Context, snap: Snapshot?) {
+    /** [atStation] = gerade am Bahnhof dieses Zugs angekommen (Geofence): einmal hervorheben, "Los" sofort zeigen. */
+    fun onPinned(ctx: Context, snap: Snapshot?, atStation: Boolean = false) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         val p = Repo.prefs(ctx)
         val train = Repo.pinnedTrain(ctx)
@@ -166,7 +167,10 @@ object Notifier {
         val changed = last != Int.MIN_VALUE && (key == -999 && last != -999 ||
             key != -999 && last != -999 && kotlin.math.abs(key - last) >= Repo.pinThreshold(ctx))
         if (last == Int.MIN_VALUE || changed) p.edit().putInt("pin_last_delay", key).apply()
-        val alert = changed && Repo.pinNotify(ctx)
+        // am Bahnhof: merken (bis kurz nach der Abfahrt), damit auch spaetere Aktualisierungen "Los" zeigen
+        if (atStation) p.edit().putString("pin_here", r.train).putLong("pin_here_until", r.depEpoch + 10 * 60_000L).apply()
+        val here = p.getString("pin_here", null) == r.train && now < p.getLong("pin_here_until", 0)
+        val alert = (changed && Repo.pinNotify(ctx)) || atStation
         if (!Repo.pinLock(ctx) && !alert) { nm.cancel(PIN_ID); return }
 
         val departed = r.depEpoch < now - 60_000
@@ -181,9 +185,9 @@ object Notifier {
             r.platform?.let { "Gleis $it" },
             if (!r.cancelled && !departed) "an ${r.arrExpected}" else null,
             r.reason?.takeIf { !r.cancelled }?.replaceFirstChar { it.uppercase() },
-        ).joinToString(" · ")
+        ).joinToString(" · ").let { if (here && !departed && !r.cancelled) "Du bist am Bahnhof · $it" else it }
         val open = PendingIntent.getActivity(ctx, 9, Intent(ctx, MainActivity::class.java)
-            .putExtra("train", r.train).putExtra("dep", r.depPlanned)
+            .putExtra("train", r.train).putExtra("dep", r.depPlanned).putExtra("rel", rel.id)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = Notification.Builder(ctx, if (alert) CH_PIN_ALERT else CH_PIN)   // Builder, wird unten ggf. zum Live Update
@@ -197,13 +201,23 @@ object Notifier {
             .setCategory(Notification.CATEGORY_TRANSPORT)
             .setContentIntent(open)
             .setTimeoutAfter(maxOf(60_000L, r.arrEpoch - now + 5 * 60_000L))
-        // vor der Abfahrt: direkt einchecken ("Ich fahre mit" startet die Aufzeichnung in der App)
-        if (!departed && !r.cancelled && !r.bus) {
-            val checkin = PendingIntent.getActivity(ctx, 10, Intent(ctx, MainActivity::class.java)
-                .putExtra("checkin", true).putExtra("train", r.train)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            n.addAction(Notification.Action.Builder(null, "Ich fahre mit", checkin).build())
+        // "Ich fahre mit" erst kurz vor der Abfahrt (~5 min) - oder sofort, wenn du schon am Bahnhof bist.
+        // Am Bahnhof startet "Los" die Aufzeichnung direkt (auch gesperrt), sonst oeffnet es die App.
+        val soon = r.depEpoch - now <= 5 * 60_000L
+        if (!departed && !r.cancelled && !r.bus && (soon || here)) {
+            val action = if (here) {
+                val pi = PendingIntent.getForegroundService(ctx, 11,
+                    de.rb64.live.ride.RideService.startIntent(ctx, de.rb64.live.ride.RideService.infoFrom(rel, r)),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                Notification.Action.Builder(null, "▶ Los, ich fahre mit", pi).setAuthenticationRequired(false).build()
+            } else {
+                val checkin = PendingIntent.getActivity(ctx, 10, Intent(ctx, MainActivity::class.java)
+                    .putExtra("checkin", true).putExtra("train", r.train)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                Notification.Action.Builder(null, "Ich fahre mit", checkin).build()
+            }
+            n.addAction(action)
         }
         // Android 16+: als Live Update oben (Statusleisten-Chip, Sperrbildschirm), wie bei der Fahrt
         if (android.os.Build.VERSION.SDK_INT >= 36 && Repo.pinLock(ctx) && !r.cancelled) {
@@ -270,7 +284,10 @@ object Notifier {
                     .setGroup(rel.id)
                     .setAutoCancel(true)
                     .setTimeoutAfter(maxOf(60_000L, r.depEpoch - now + 10 * 60_000L))   // verschwindet nach Abfahrt
-                    .setContentIntent(PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java),
+                    // eigener requestCode je Strecke+Zug, sonst ueberschreiben sich die Extras mehrerer Meldungen
+                    .setContentIntent(PendingIntent.getActivity(ctx, (rel.id + r.train).hashCode(), Intent(ctx, MainActivity::class.java)
+                        .putExtra("train", r.train).putExtra("dep", r.depPlanned).putExtra("rel", rel.id)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
                         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
                     .addAction(Notification.Action.Builder(null, "Zug genommen · Rest stumm", muteIntent).build())
                     .build()

@@ -225,7 +225,9 @@ fun TopBar(
     below: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
     Column(
-        modifier.fillMaxWidth().elevation(Elev.e2, RectangleShape).background(Rb.c.header).statusBarsPadding()
+        modifier.fillMaxWidth().elevation(Elev.e2, RectangleShape)
+            // Kopfzeile nach Tageszeit (nur bei farbiger Kopfleiste und eingeschaltetem Effekt)
+            .skyBackground(Rb.c.header, LocalVis.current.daytimeHeader && LocalVis.current.colorHeader).statusBarsPadding()
             .padding(start = if (onBack != null) Dim.s4 else Dim.s16, end = Dim.s8, top = Dim.s8, bottom = Dim.s8),
     ) {
         Row(Modifier.fillMaxWidth().height(Dim.touch), verticalAlignment = Alignment.CenterVertically) {

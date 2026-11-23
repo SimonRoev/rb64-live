@@ -96,7 +96,10 @@ class MainActivity : ComponentActivity() {
         setContent { ThemedRoot(this) }
         if (intent?.getBooleanExtra("summary", false) == true) UiRequests.summary.value = true
         if (intent?.getBooleanExtra("checkin", false) == true) UiRequests.checkin.value = intent.getStringExtra("train")
-        else intent?.getStringExtra("train")?.let { UiRequests.openTrain.value = it to (intent.getStringExtra("dep") ?: "") }
+        else intent?.getStringExtra("train")?.let {
+            UiRequests.openRel.value = intent.getStringExtra("rel")
+            UiRequests.openTrain.value = it to (intent.getStringExtra("dep") ?: "")
+        }
     }
 
     override fun onResume() {
@@ -112,7 +115,10 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra("summary", false)) UiRequests.summary.value = true
         if (intent.getBooleanExtra("checkin", false)) UiRequests.checkin.value = intent.getStringExtra("train")
-        else intent.getStringExtra("train")?.let { UiRequests.openTrain.value = it to (intent.getStringExtra("dep") ?: "") }
+        else intent.getStringExtra("train")?.let {
+            UiRequests.openRel.value = intent.getStringExtra("rel")
+            UiRequests.openTrain.value = it to (intent.getStringExtra("dep") ?: "")
+        }
     }
 }
 
@@ -121,6 +127,8 @@ object UiRequests {
     val summary = androidx.compose.runtime.mutableStateOf(false)
     /** Zug, dessen Detailblatt geoeffnet werden soll (aus Widget oder Benachrichtigung): Zugnummer, Plan-Abfahrt. */
     val openTrain = androidx.compose.runtime.mutableStateOf<Pair<String, String>?>(null)
+    /** Strecke (relId) dieses Zugs, falls er nicht auf der gerade gewaehlten Strecke liegt. */
+    val openRel = androidx.compose.runtime.mutableStateOf<String?>(null)
     /** Gespeicherte Fahrt, deren Auswertung im Tab "Fahrten" offen ist. */
     val openRide = androidx.compose.runtime.mutableStateOf<String?>(null)
     /** "Ich fahre mit" aus dem Live Update des angehefteten Zugs (Zugnummer). */
@@ -143,7 +151,7 @@ private fun ThemedRoot(act: ComponentActivity) {
     val ctx = LocalContext.current
     var tick by remember { mutableIntStateOf(0) }
     DisposableEffect(Unit) {
-        val l = SharedPreferences.OnSharedPreferenceChangeListener { _, k -> if (k == "theme_mode" || k == "onboarded" || k?.startsWith("vis_") == true) tick++ }
+        val l = SharedPreferences.OnSharedPreferenceChangeListener { _, k -> if (k == "theme_mode" || k == "onboarded" || k == "news_seen" || k?.startsWith("vis_") == true) tick++ }
         Repo.prefs(ctx).registerOnSharedPreferenceChangeListener(l)
         onDispose { Repo.prefs(ctx).unregisterOnSharedPreferenceChangeListener(l) }
     }
@@ -151,7 +159,10 @@ private fun ThemedRoot(act: ComponentActivity) {
     val vis = remember(tick) { Repo.visuals(ctx) }
     val dark = isDark(mode)
     val onboarded = remember(tick) { Repo.prefs(ctx).getBoolean("onboarded", false) }
-    val headerDark = dark || (vis.colorHeader && onboarded)    // Einfuehrung hat keine farbige Kopfleiste
+    // nach einem Update: einmal zeigen, was neu ist (abhaengig von der zuletzt gesehenen Version)
+    val news = remember(tick) { WhatsNew.pending(ctx) }
+    // Einfuehrung und "Neu in" haben keine farbige Kopfleiste -> dunkle Symbole in der Statusleiste
+    val headerDark = dark || (vis.colorHeader && onboarded && news.isEmpty())
     SideEffect {
         val t = android.graphics.Color.TRANSPARENT
         act.enableEdgeToEdge(
@@ -160,8 +171,14 @@ private fun ThemedRoot(act: ComponentActivity) {
         )
     }
     Rb64Theme(mode, vis) {
-        if (onboarded) AppRoot()
-        else Onboarding(onDone = { Repo.prefs(ctx).edit().putBoolean("onboarded", true).apply() })
+        when {
+            !onboarded -> Onboarding(onDone = {
+                // wer die Einfuehrung gerade gesehen hat, braucht die Neuerungen nicht extra
+                Repo.prefs(ctx).edit().putBoolean("onboarded", true).putInt("news_seen", BuildConfig.VERSION_CODE).apply()
+            })
+            news.isNotEmpty() -> WhatsNewScreen(news, onDone = { WhatsNew.markSeen(ctx) })
+            else -> AppRoot()
+        }
     }
 }
 
@@ -254,6 +271,8 @@ private fun DeparturesScreen(
     val ctx = LocalContext.current
     var showPast by remember { mutableStateOf(false) }
     var sheetRow by remember { mutableStateOf<Row?>(null) }
+    var sheetRelId by remember { mutableStateOf<String?>(null) }     // Detailblatt fuer einen Zug einer anderen Strecke
+    var mapFor by remember { mutableStateOf<Pair<String, String>?>(null) }   // grosse Karte: Zug, Strecke
     val snap = remember(tick) { Repo.load(ctx) }
     val favs = remember(tick) { Repo.favs(ctx) }
     val favIdx = remember(tick) { Repo.favIndex(ctx) }
@@ -273,16 +292,23 @@ private fun DeparturesScreen(
     val openReq by UiRequests.openTrain
     LaunchedEffect(openReq, rel) {
         val q = openReq ?: return@LaunchedEffect
-        val hit = rel?.rows?.firstOrNull { it.train == q.first && (q.second.isEmpty() || it.depPlanned == q.second) }
-            ?: rel?.rows?.firstOrNull { it.train == q.first }
-        if (hit != null) sheetRow = hit
-        if (rel != null) UiRequests.openTrain.value = null
+        fun find(r: Rel?) = r?.rows?.firstOrNull { it.train == q.first && (q.second.isEmpty() || it.depPlanned == q.second) }
+            ?: r?.rows?.firstOrNull { it.train == q.first }
+        val hit = find(rel)
+        if (hit != null) { sheetRelId = null; sheetRow = hit }
+        else if (snap != null) {
+            // Zug liegt nicht auf der gewaehlten Strecke: Strecke aus der Meldung, sonst ab seinem naechsten Halt
+            val other = UiRequests.openRel.value?.let { Repo.relById(snap, it) }?.takeIf { find(it) != null }
+                ?: snap.relForTrain(q.first)?.first
+            find(other)?.let { sheetRelId = other!!.id; sheetRow = it }
+        }
+        if (rel != null) { UiRequests.openTrain.value = null; UiRequests.openRel.value = null }
     }
     val rideDeparted = ride != null && de.rb64.live.ride.Analyzer.departures(ride.events).containsKey(ride.info.from)
     val lastRide by de.rb64.live.ride.RideStore.last.collectAsState()
     val askNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { Notifier.onPinned(ctx, snap) }
-    fun togglePin(r: Row) {
-        if (r.train == pinned) Repo.unpin(ctx) else rel?.let { Repo.pin(ctx, r, it.id) }
+    fun togglePin(r: Row, relId: String? = null) {
+        if (r.train == pinned) Repo.unpin(ctx) else (relId ?: rel?.id)?.let { Repo.pin(ctx, r, it) }
         Rb64WidgetProvider.updateAll(ctx)
         if (r.train != pinned && !Notifier.permitted(ctx)) askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
         else Notifier.onPinned(ctx, snap)
@@ -403,17 +429,24 @@ private fun DeparturesScreen(
         }
     }
 
+    mapFor?.let { (t, id) ->
+        val s0 = snap; val r0 = s0?.let { Repo.relById(it, id) }
+        if (s0 != null && r0 != null) { val (lo, hi) = s0.mapRangeFor(t, r0); TrainMapDialog(s0, t, lo, hi) { mapFor = null } }
+    }
     val sr = sheetRow
-    if (sr != null && rel != null) {
+    val sheetRel = sheetRelId?.let { id -> snap?.let { Repo.relById(it, id) } } ?: rel
+    if (sr != null && sheetRel != null) {
+        @Suppress("NAME_SHADOWING") val rel = sheetRel
         val cur = rel.rows.firstOrNull { it.train == sr.train && it.depPlanned == sr.depPlanned } ?: sr
-        de.rb64.live.ui.RbSheet(onDismiss = { sheetRow = null }) {
+        de.rb64.live.ui.RbSheet(onDismiss = { sheetRow = null; sheetRelId = null }) {
             TripSheet(rel, cur, now, stale, weekday, rideHere(cur), canRide(cur),
                 pinned = cur.train == pinned,
-                onTogglePin = { togglePin(cur) },
+                onTogglePin = { togglePin(cur, rel.id) },
                 stand = snap?.let { "Stand ${HM.format(Date(it.fresh))} · ${ageText(it.ageMs(now))}" },
                 refreshing = refreshing, onRefresh = { refresh(ctx) },
                 notifyOn = notifyTick.let { Rules.forTrain(ctx, cur.train, cur.depPlanned, rel.id) != null },
                 onToggleNotify = { toggleNotify(rel, cur) },
+                onShowMap = { mapFor = cur.train to rel.id },
                 vehicle = snap?.vehicleFor(cur.train, now),
                 histSeries = HistStore.series(ctx, rel, cur, weekday),
                 pcheck = PCheckStore.forRow(ctx, rel.id, cur),
@@ -430,6 +463,7 @@ private fun LiveScreen(tick: Int) {
     val snap = remember(tick) { Repo.load(ctx) }
     val range = remember(tick) { Repo.liveRange(ctx) }
     var sheetTrain by remember { mutableStateOf<String?>(null) }
+    var liveMapFor by remember { mutableStateOf<Pair<String, String>?>(null) }   // grosse Karte: Zug, Strecke
     var liveNotifyTick by remember { mutableIntStateOf(0) }
     // angetippter Zug: Detailblatt ab seinem naechsten Halt bis zum Ziel
     val st = sheetTrain
@@ -453,6 +487,7 @@ private fun LiveScreen(tick: Int) {
                 histSeries = HistStore.series(ctx, rel, row, weekday),
                 pcheck = PCheckStore.forRow(ctx, rel.id, row),
                 notifyOn = liveNotifyTick.let { Rules.forTrain(ctx, row.train, row.depPlanned, rel.id) != null },
+                onShowMap = { liveMapFor = row.train to rel.id },
                 onToggleNotify = {
                     val on = Rules.toggleTrain(ctx, rel, row)
                     Repo.prefs(ctx).edit().putBoolean("n_rules_custom", true).apply()
@@ -460,6 +495,10 @@ private fun LiveScreen(tick: Int) {
                     liveNotifyTick++
                 })
         }
+    }
+    liveMapFor?.let { (t, id) ->
+        val s0 = snap; val r0 = s0?.let { Repo.relById(it, id) }
+        if (s0 != null && r0 != null) { val (lo, hi) = s0.mapRangeFor(t, r0); TrainMapDialog(s0, t, lo, hi) { liveMapFor = null } }
     }
     Column(Modifier.fillMaxSize()) {
         TopBar("Strecke live", below = {
@@ -506,11 +545,14 @@ private fun RidesScreen(ride: de.rb64.live.ride.RideState?, onGoDepartures: () -
         wasRiding = ride != null
     }
     val open = remember(openId, rides) { openId?.let { de.rb64.live.ride.RideStore.load(ctx, it) } }
+    var book by remember { mutableStateOf(false) }
     BackHandler(enabled = ride == null && open != null) { openId = null }
+    BackHandler(enabled = ride == null && open == null && book) { book = false }
     when {
         ride != null -> de.rb64.live.ride.RideScreen(ride)
         open != null -> de.rb64.live.ride.SummaryScreen(open, onBack = { openId = null })
-        else -> de.rb64.live.ride.RideListScreen(rides, onOpen = { openId = it }, onGoDepartures = onGoDepartures)
+        book -> de.rb64.live.ride.StampBookScreen(rides, onBack = { book = false })
+        else -> de.rb64.live.ride.RideListScreen(rides, onOpen = { openId = it }, onGoDepartures = onGoDepartures, onOpenBook = { book = true })
     }
 }
 
@@ -668,6 +710,9 @@ private fun SettingsScreen(onBack: () -> Unit) {
             RbCard(padding = Dim.s8) {
                 NavRow("Einführung anzeigen", "Strecke wählen, Zeiten lesen und alle Funktionen") {
                     Repo.prefs(ctx).edit().putBoolean("onboarded", false).apply()
+                }
+                NavRow("Neu in Version ${BuildConfig.VERSION_NAME}", "Was sich mit dem letzten Update geändert hat") {
+                    WhatsNew.showAgain(ctx)
                 }
                 var updMsg by remember { mutableStateOf<String?>(null) }
                 val upd = Updates.available(ctx)

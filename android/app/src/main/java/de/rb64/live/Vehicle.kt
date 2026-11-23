@@ -128,13 +128,17 @@ fun VehicleLine(v: VehicleView) {
 
 /** Block im Detailblatt: Vorfahrt -> aktueller Ort -> Wende -> deine Fahrt, mit Einordnung. */
 @Composable
-fun VehicleBlock(v: VehicleView, myTrain: String, myFrom: String, myDep: String) {
+fun VehicleBlock(v: VehicleView, myTrain: String, myFrom: String, myDep: String, myDelay: Int = 0) {
     var open by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     val verdict = when {
         v.state == VehicleView.State.CANCELLED -> "Die vorherige Fahrt fällt aus – unklar, wann dein Zug kommt. Im Zweifel früher am Bahnsteig sein."
         v.carry > 0 -> "Die ${v.turnMin} min Puffer in ${v.turnStation} reichen nicht: dein Zug fährt dort ca. +${v.carry} ab."
-        v.delay >= 1 -> "Die ${v.turnMin} min Puffer in ${v.turnStation} fangen die +${v.delay} auf – daher keine Verspätung für deinen Zug."
-        else -> "Der Zug ist pünktlich unterwegs – daher keine Verspätung für deinen Zug."
+        v.delay >= 1 -> "Die ${v.turnMin} min Puffer in ${v.turnStation} fangen die +${v.delay} auf – vom Fahrzeug kommt keine Verspätung."
+        else -> "Das Fahrzeug ist pünktlich – von ihm kommt keine Verspätung."
+    } + when {
+        // die Verspaetung des eigenen Zugs hat dann einen anderen Grund (z. B. Kreuzung) - nicht "keine Verspaetung" behaupten
+        v.state != VehicleView.State.CANCELLED && myDelay - v.carry >= 2 -> " Die +$myDelay deines Zugs haben einen anderen Grund (siehe oben)."
+        else -> ""
     }
     de.rb64.live.ui.Collapsible("Woher kommt dein Zug?", open, { open = !open },
         Modifier.fillMaxWidth().border(1.dp, Rb.c.line, RoundedCornerShape(Dim.rCard)).padding(horizontal = 14.dp, vertical = 4.dp),
@@ -143,7 +147,7 @@ fun VehicleBlock(v: VehicleView, myTrain: String, myFrom: String, myDep: String)
                 modifier = Modifier.border(1.dp, Rb.c.graphic, RoundedCornerShape(999.dp)).padding(horizontal = 8.dp, vertical = 2.dp))
         }) {
         if (!open) {
-            Text("${v.heroLines().first} · $verdict", style = Ts.small, color = Rb.c.onSurface,
+            Text(if (v.state == VehicleView.State.CANCELLED) verdict else "${v.heroLines().first} · $verdict", style = Ts.small, color = Rb.c.onSurface,
                 modifier = Modifier.padding(bottom = 10.dp))
             return@Collapsible
         }

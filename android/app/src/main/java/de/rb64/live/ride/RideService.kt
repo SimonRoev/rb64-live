@@ -150,7 +150,13 @@ class RideService : Service() {
         cur?.info?.train?.let { de.rb64.live.Notifier.onRideFinished(this, it) }
         done?.info?.train?.let { de.rb64.live.Notifier.onRideFinished(this, it) }
         if (done != null) {
-            Cloud.uploadRide(this, done)
+            // Dienst laeuft weiter, bis die Fahrt oben ist (hoechstens 2 min) - sonst friert Android die App im
+            // Hintergrund ein und der Upload haengt bis zum naechsten Oeffnen
+            val main = android.os.Handler(Looper.getMainLooper())
+            var closed = false
+            val close = Runnable { if (!closed) { closed = true; stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() } }
+            main.postDelayed(close, 120_000L)
+            Cloud.uploadRide(this, done) { main.post(close) }
             val nm = getSystemService(NotificationManager::class.java)
             nm.notify(DONE_NOTIF_ID, Notification.Builder(this, CH_RIDE)
                 .setSmallIcon(R.drawable.ic_notify)
@@ -160,6 +166,7 @@ class RideService : Service() {
                 .setContentIntent(PendingIntent.getActivity(this, 5, Intent(this, MainActivity::class.java).putExtra("summary", true)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_IMMUTABLE))
                 .build())
+            return
         }
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
