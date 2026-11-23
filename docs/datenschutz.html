@@ -24,7 +24,7 @@
 <main class="wrap">
   <article class="doc">
     <h1>Datenschutzerklärung</h1>
-    <p>für die Android-App „RB64 Live“ · Stand: 20. November 2026</p>
+    <p>für die Android-App „RB64 Live“ · Stand: 23. November 2026</p>
 
     <h2>Verantwortlich</h2>
     <p>Simon Rövekamp<br>
@@ -43,8 +43,10 @@
     <h2>1. Anonyme Kennung und Push</h2>
     <p>Damit der Server dir aktuelle Zugdaten schicken kann, meldet sich die App beim Start anonym bei Google Firebase an.
       Dabei entsteht eine zufällige Kennung; Name, E-Mail oder Telefonnummer werden nicht abgefragt.
-      Gespeichert werden diese Kennung, das Push-Token deines Geräts (Firebase Cloud Messaging) und der Zeitpunkt,
-      zu dem du zuletzt neue Daten angefordert hast.</p>
+      Gespeichert werden diese Kennung, das Push-Token deines Geräts (Firebase Cloud Messaging), der Zeitpunkt,
+      zu dem du zuletzt neue Daten angefordert hast, und – wenn du einen Zug anheftest – <strong>bis wann</strong> er angeheftet
+      ist (nicht welcher Zug). Dann schickt der Server neue Daten mit hoher Priorität, damit Meldungen zu deinem Zug auch bei
+      gesperrtem Handy sofort ankommen.</p>
     <p>Zweck: Zustellung der Zugdaten an die App. Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO (Bereitstellung der von dir genutzten App).</p>
 
     <h2>2. Aufgezeichnete Fahrten</h2>
@@ -52,8 +54,13 @@
     <ul>
       <li>Positionen mit Zeit, Geschwindigkeit und Genauigkeit – <strong>nur innerhalb des Bahnkorridors</strong>; Punkte abseits der Strecke werden verworfen,</li>
       <li>daraus erkannte Halte, deine Markierungen (z. B. „vor Signal“, „sehr voll“),</li>
-      <li>Zugnummer, Start, Ziel und die zum Start bekannten Fahrplan- und Prognosezeiten.</li>
+      <li>Zugnummer, Start, Ziel und die zum Start bekannten Fahrplan- und Prognosezeiten,</li>
+      <li>die zu Beginn und am Ende der Fahrt in der App angezeigten öffentlichen Wetterwarnungen (z. B. „Glätte bis 10:00“) –
+        ohne Bezug zu deinem Standort; sie werden mit der Fahrt übertragen, können bei der Auswertung der Pünktlichkeit
+        berücksichtigt werden und erscheinen auf der Fahrkarte in der App.</li>
     </ul>
+    <p>Aus der Fahrt erstellt die App außerdem eine Fahrkarte und ein Stempelheft. Dafür werden nur die Daten der Fahrt verwendet;
+      was dazu gehört (z. B. Klasse oder Spruch einer Karte), bleibt auf deinem Gerät und in deinen eigenen Sicherungen.</p>
     <p>Brichst du die Aufzeichnung ab, bevor der Zug losfährt, wird nichts gespeichert. Nach der Fahrt wird sie zusammen mit
       der anonymen Kennung an unseren Server übertragen. Dort wird sie ausgewertet, um die Verspätungsprognose für die RB64 zu
       verbessern (z. B. wo Züge vor Signalen warten). Auf dem Server wird die Kennung nur als gekürzter Hashwert gespeichert.</p>
