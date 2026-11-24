@@ -181,6 +181,12 @@ fun SummaryScreen(s: RideState, onBack: () -> Unit) {
             val hist by RideStore.history.collectAsState()
             val ticket = remember(s.info.id, hist.size) { Tickets.of(ctx, s, hist) }
             TicketCard(ticket, Modifier.fillMaxWidth().padding(top = Dim.s8))
+            // Teilen sitzt unter der Karte, nicht auf ihr (dort liegen die Gesten)
+            var shareCard by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                de.rb64.live.ui.TextAction("Karte teilen", null, { shareCard = true })
+            }
+            if (shareCard) TicketShareSheet(ticket, onClose = { shareCard = false })
             RbCard {
                 Text("${s.info.train} ${s.info.from} → ${s.info.to}", style = Ts.title)
                 s.info.corrected?.let {
@@ -250,7 +256,8 @@ private val DAY = SimpleDateFormat("EE dd.MM.", Locale.GERMANY)
 
 /** Alle gespeicherten Fahrten, neueste zuerst; oben eine kleine Bilanz. Antippen oeffnet die Auswertung. */
 @Composable
-fun RideListScreen(rides: List<RideMeta>, onOpen: (String) -> Unit, onGoDepartures: () -> Unit, onOpenBook: () -> Unit = {}) {
+fun RideListScreen(rides: List<RideMeta>, onOpen: (String) -> Unit, onGoDepartures: () -> Unit, onOpenBook: () -> Unit = {},
+                   onOpenReview: (MonthReviews.Pending) -> Unit = {}) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     Column(Modifier.fillMaxSize()) {
         TopBar("Fahrten")
@@ -259,6 +266,18 @@ fun RideListScreen(rides: List<RideMeta>, onOpen: (String) -> Unit, onGoDepartur
             verticalArrangement = Arrangement.spacedBy(Dim.s8)) {
             // fehlende Berechtigungen fuer Fahrten (verschwindet, sobald alles da ist)
             item { RidePermissionsCard() }
+            // Monatsrueckblick fuer den Vormonat (ab dem 1., den ganzen Monat ueber)
+            val review = MonthReviews.pending(rides)
+            if (review != null) item {
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(Dim.rCard))
+                    .background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(
+                        androidx.compose.ui.graphics.Color(0xFFF97316), androidx.compose.ui.graphics.Color(0xFFDB2777), androidx.compose.ui.graphics.Color(0xFF6D28D9))))
+                    .clickable { onOpenReview(review) }.padding(Dim.s16)) {
+                    Text("Dein ${review.name} ist da", style = Ts.title, color = androidx.compose.ui.graphics.Color.White)
+                    Text("${review.rides.size} Fahrten im Rückblick – antippen zum Ansehen", style = Ts.small,
+                        color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.9f))
+                }
+            }
             if (rides.isEmpty()) item {
                 RbCard {
                     Text("Noch keine Fahrt aufgezeichnet", style = Ts.textStrong)
@@ -276,7 +295,7 @@ fun RideListScreen(rides: List<RideMeta>, onOpen: (String) -> Unit, onGoDepartur
                     Row(horizontalArrangement = Arrangement.spacedBy(Dim.s16)) {
                         Stat("${rides.size}", "Fahrten")
                         Stat("%.0f km".format(rides.sumOf { it.km }), "gefahren")
-                        if (d.isNotEmpty()) Stat("+${d.sorted()[d.size / 2]}", "meist am Ziel")
+                        if (d.isNotEmpty()) Stat(d.sorted()[d.size / 2].let { m -> when { m > 0 -> "+$m"; m < 0 -> "−${-m}"; else -> "±0" } }, "meist am Ziel")
                         if (d.isNotEmpty()) Stat("${d.count { it < 3 } * 100 / d.size} %", "pünktlich")
                     }
                 }

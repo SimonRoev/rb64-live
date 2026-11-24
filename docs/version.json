@@ -1,10 +1,10 @@
 {
-  "versionCode": 14,
-  "versionName": "0.14",
-  "date": "2026-11-23",
+  "versionCode": 15,
+  "versionName": "0.15",
+  "date": "2026-11-24",
   "url": "https://simonroev.github.io/rb64-live/download/rb64-live.apk",
   "page": "https://simonroev.github.io/rb64-live/#download",
-  "sha256": "23db283f7542ab489c8dd68ec1c94ba7f388ece85bf5d894b0d0d198ff41f7c0",
-  "size": 30808381,
-  "notes": "Fahrkarte und Stempelheft nach jeder Fahrt, Strecke eines Zuges ansehen, Kopfzeile nach Tageszeit, angehefteter Zug: Mitfahren erst kurz vor Abfahrt"
+  "sha256": "d25becea96b17f5dec863100ce82423824c35687f67647144beef617f4fec2ef",
+  "size": 31038169,
+  "notes": "Monatsrückblick als Story, Fahrkarte und Rückblick als Bild teilen, neue Kartenvarianten und Kritzeleien, Link zum Fahrgastrechte-Antrag"
 }

@@ -13,6 +13,8 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
     override suspend fun doWork(): Result {
         withContext(Dispatchers.Main) { Repo.requestRefresh(applicationContext) }
         Rb64WidgetProvider.updateAll(applicationContext)
+        // am 1. des Monats: einmal melden, dass der Monatsrueckblick da ist
+        runCatching { de.rb64.live.ride.MonthReviews.notifyIfDue(applicationContext) }
         return Result.success()
     }
 }

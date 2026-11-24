@@ -50,6 +50,19 @@ object WhatsNew {
     data class Release(val code: Int, val name: String, val items: List<Item>)
 
     val RELEASES: List<Release> = listOf(
+        Release(15, "0.15", listOf(
+            Item(RbIcons.trend, "Dein Monatsrückblick",
+                "Bist du in einem Monat mindestens 8-mal mitgefahren, kommt am 1. dein Rückblick als kleine Story: Fahrten, Kilometer, " +
+                    "Kreuzungen und deine Lieblingszeit. Du findest ihn auch oben unter „Fahrten“."),
+            Item(RbIcons.announce, "Karte und Rückblick teilen",
+                "Unter der Fahrkarte und oben im Rückblick: „Teilen“ macht ein Bild daraus. Uhrzeiten, Datum, Zug und Platz " +
+                    "sind nur dabei, wenn du „Details zeigen“ einschaltest."),
+            Item(RbIcons.rides, "Mehr zum Sammeln",
+                "Neue seltene Kartenvarianten, ab und zu eine Kritzelei und ein paar Überraschungen im Stempelheft."),
+            Item(RbIcons.warning, "Fahrgastrechte",
+                "Ab 20 Minuten Verspätung liegt der Karte ein Hinweis bei – jetzt mit Link zum Entschädigungsantrag der DB " +
+                    "und wie lange du ihn noch stellen kannst."),
+        )),
         Release(14, "0.14", listOf(
             Item(RbIcons.rides, "Deine Fahrkarte",
                 "Nach jeder Fahrt gibt es eine Fahrkarte zum Sammeln – mit Platzreservierung, Stempel und einem Spruch. " +

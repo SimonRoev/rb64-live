@@ -277,6 +277,37 @@ fun StampBookScreen(rides: List<RideMeta>, onBack: () -> Unit) {
             }
             hint?.let { Text("${it.name} (${it.rarity.label}): ${it.hint}", style = Ts.small, color = Rb.c.muted) }
 
+            // Kartenvarianten: gefundene mit Anzahl, unbekannte nur als Fragezeichen
+            val vars = book?.variants ?: emptyMap()
+            val allVars = Extras.VARIANTS.distinctBy { it.name }
+            SectionHeader("Varianten · ${vars.size + (if ((book?.doodles ?: 0) > 0) 1 else 0)} von ${allVars.size + 1}")
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Dim.s8), verticalArrangement = Arrangement.spacedBy(Dim.s8)) {
+                val doodles = book?.doodles ?: 0
+                if (doodles > 0) {
+                    val (bg, fg) = rarityColors(Rarity.UNCOMMON)
+                    Text("Kritzelkarte ×$doodles", style = Ts.smallBold, color = fg,
+                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(bg).padding(horizontal = 12.dp, vertical = 6.dp))
+                }
+                allVars.filter { it.name in vars }.forEach { v ->
+                    val (bg, fg) = rarityColors(v.rarity)
+                    Text("${v.name} ×${vars[v.name]}", style = Ts.smallBold, color = fg,
+                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(bg).padding(horizontal = 12.dp, vertical = 6.dp))
+                }
+                val missing = allVars.count { it.name !in vars } + (if (doodles == 0) 1 else 0)
+                if (missing > 0) Text("? ? ?  noch $missing", style = Ts.smallBold, color = Color(0xFF9CA3AF),
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp))
+            }
+
+            // Sammelkarten mit Stufen: Treue (Fahrten) und Geduld (Verspaetungsminuten, je Fahrt hoechstens 60)
+            SectionHeader("Karten")
+            Row(horizontalArrangement = Arrangement.spacedBy(Dim.s8)) {
+                Extras.PASSES.forEach { pass ->
+                    val value = if (pass.id == "treue") book?.rides ?: 0 else book?.delayMinutes ?: 0
+                    PassCard(pass, value, Modifier.weight(1f))
+                }
+            }
+
             // Spruchsammlung: wie viele Sprueche je Seltenheit schon auf Karten standen
             SectionHeader("Sprüche · ${found.size} von ${Extras.LINES.size}",
                 action = if (found.isNotEmpty()) (if (showLines) "Weniger" else "Ansehen") else null,
@@ -296,6 +327,34 @@ fun StampBookScreen(rides: List<RideMeta>, onBack: () -> Unit) {
                 }
             }
             Spacer(Modifier.height(Dim.s16))
+        }
+    }
+}
+
+/**
+ * Sammelkarte mit Stufen 25/50/100 (Anspielung auf die BahnCard, eigene Gestaltung):
+ * Farbe steigt von Grau ueber Silber zu Gold, darunter der Fortschritt zur naechsten Stufe.
+ */
+@Composable
+private fun PassCard(pass: Pass, value: Int, modifier: Modifier) {
+    val level = pass.steps.count { value >= it }
+    val next = pass.steps.firstOrNull { value < it }
+    val bg = when (level) {
+        0 -> listOf(Color(0xFFE5E7EB), Color(0xFFD1D5DB))
+        1 -> listOf(Color(0xFFB91C1C), Color(0xFF7F1D1D))
+        2 -> listOf(Color(0xFFE5E7EB), Color(0xFF9CA3AF), Color(0xFFF3F4F6))
+        else -> listOf(Color(0xFFFDE68A), Color(0xFFB8860B), Color(0xFFFDE68A))
+    }
+    val fg = when (level) { 0 -> Color(0xFF6B7280); 1 -> Color.White; else -> Color(0xFF1F2937) }
+    Column(modifier.clip(RoundedCornerShape(12.dp)).background(androidx.compose.ui.graphics.Brush.linearGradient(bg)).padding(12.dp)) {
+        Text(pass.name.uppercase(), style = MONO.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = fg, letterSpacing = 1.sp))
+        Text(if (level == 0) "–" else "${pass.steps[level - 1]}", style = Ts.big.copy(fontSize = 28.sp), color = fg)
+        Text(if (next != null) "$value / $next ${pass.unit}" else "$value ${pass.unit} · voll", style = MONO.copy(fontSize = 9.sp, color = fg))
+        Spacer(Modifier.height(6.dp))
+        Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(fg.copy(alpha = 0.25f))) {
+            val prev = if (level == 0) 0 else pass.steps[level - 1]
+            val frac = if (next == null) 1f else ((value - prev).toFloat() / (next - prev)).coerceIn(0f, 1f)
+            Box(Modifier.fillMaxWidth(frac).height(4.dp).background(fg))
         }
     }
 }

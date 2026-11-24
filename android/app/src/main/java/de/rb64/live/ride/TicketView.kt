@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -47,6 +49,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -59,6 +64,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -167,19 +173,47 @@ fun TicketCard(t: Ticket, modifier: Modifier = Modifier) {
 @Composable
 private fun TicketFront(t: Ticket) {
     val shape = RoundedCornerShape(18.dp)
-    val tilt by rememberTilt()
-    val bg = when { t.wear != Wear.NONE -> PAPER_WORN; t.cls == TicketClass.FIRST -> PAPER_1; else -> PAPER }
-    var frame = Modifier.fillMaxSize().shadow(10.dp, shape).clip(shape).background(bg)
+    val tilt by rememberTiltXY()
+    val bg = variantPaper(t) ?: when { t.wear != Wear.NONE -> PAPER_WORN; t.cls == TicketClass.FIRST -> PAPER_1; else -> PAPER }
+    val ctx = LocalContext.current
+    val punchKey = "tk_punch_${t.id}"
+    var punch by remember { mutableFloatStateOf(prefs(ctx).getFloat(punchKey, -1f)) }
+    var edgeY by remember { mutableFloatStateOf(-1f) }
+    // Kerben und Zangenloch werden aus der Karte ausgestanzt: dahinter sieht man den echten Hintergrund
+    var frame = Modifier.fillMaxSize().shadow(10.dp, shape).clip(shape)
+        .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            if (edgeY < 0f) return@drawWithContent
+            val notch = 9.dp.toPx()
+            drawCircle(Color.Black, notch, Offset(0f, edgeY), blendMode = androidx.compose.ui.graphics.BlendMode.Clear)
+            drawCircle(Color.Black, notch, Offset(size.width, edgeY), blendMode = androidx.compose.ui.graphics.BlendMode.Clear)
+            if (punch >= 0f) {
+                val cx = punch * size.width; val r = 6.5.dp.toPx()
+                val hole = Path().apply {
+                    moveTo(cx, edgeY - r); lineTo(cx + r * 0.85f, edgeY); lineTo(cx, edgeY + r); lineTo(cx - r * 0.85f, edgeY); close()
+                }
+                drawPath(hole, Color.Black, blendMode = androidx.compose.ui.graphics.BlendMode.Clear)
+                // Tiefe: die obere Schnittkante wirft einen weichen Schatten ins Loch, unten faellt Licht auf die Kante
+                clipPath(hole) {
+                    drawRect(Brush.linearGradient(listOf(Color.Black.copy(alpha = 0.32f), Color.Transparent),
+                        start = Offset(cx - r, edgeY - r), end = Offset(cx + r * 0.2f, edgeY + r * 0.2f)))
+                }
+                drawLine(Color.White.copy(alpha = 0.55f), Offset(cx + 0.5.dp.toPx(), edgeY + r), Offset(cx + r * 0.85f, edgeY + 0.5.dp.toPx()), 0.8.dp.toPx())
+                drawLine(Color.White.copy(alpha = 0.55f), Offset(cx - 0.5.dp.toPx(), edgeY + r), Offset(cx - r * 0.85f, edgeY + 0.5.dp.toPx()), 0.8.dp.toPx())
+            }
+        }
+        .background(bg)
     if (t.cls == TicketClass.FIRST) frame = frame.border(1.5.dp, BRASS, shape)
     if (t.cls == TicketClass.SPECIAL) frame = frame.border(2.dp, PETROL, shape)
     Box(frame) {
-        Watermark(t, tilt)
+        Watermark(t, tilt.strength())
         Column(Modifier.fillMaxSize()) {
             if (t.cls == TicketClass.FIRST) Box(Modifier.fillMaxWidth().height(6.dp).background(GOLD))
             Header(t)
             FromTo(t)
             RouteStrip(t)
-            TearEdge(t, bg)
+            TearEdge(t, punch, onPunch = { punch = it; prefs(ctx).edit().putFloat(punchKey, it).apply() }, onCenterY = { edgeY = it })
             Stats(t)
             Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 18.dp)) { ReservationSlip(t) }
             Bottom(t)
@@ -187,6 +221,8 @@ private fun TicketFront(t: Ticket) {
         if (t.cls == TicketClass.SPECIAL) Column(Modifier.align(Alignment.CenterEnd).padding(end = 5.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             "SONDER".forEach { Text("$it", style = SANS.copy(fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = RED, lineHeight = 12.sp)) }
         }
+        VariantOverlay(t, tilt)
+        DoodleOverlay(t)
         WearOverlay(t)
     }
 }
@@ -194,7 +230,7 @@ private fun TicketFront(t: Ticket) {
 /** Wasserzeichen: kaum zu sehen - flach halten und kippen macht es deutlicher (Datum der ersten Fahrt). */
 @Composable
 private fun BoxScope.Watermark(t: Ticket, tilt: Float) {
-    val a by animateFloatAsState(tilt, tween(250), label = "wm")
+    val a by animateFloatAsState(tilt, androidx.compose.animation.core.spring(stiffness = 60f), label = "wm")
     Column(Modifier.align(Alignment.Center).offset(y = (-60).dp).rotate(-24f), horizontalAlignment = Alignment.CenterHorizontally) {
         Text("RB64", style = SANS.copy(fontSize = 110.sp, fontWeight = FontWeight.Black, color = PETROL.copy(alpha = 0.022f + 0.17f * a), letterSpacing = (-4).sp))
         Text("unterwegs seit ${t.firstRide?.let { DMY.format(Date(it)) } ?: "heute"}",
@@ -208,7 +244,9 @@ private fun Header(t: Ticket) {
     var memory by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(memory) { if (memory != null) { delay(4_000); memory = null } }
     val head = when { t.wear != Wear.NONE -> PETROL_WORN; else -> PETROL }
-    val headMod = if (t.cls == TicketClass.SPECIAL)
+    val variantHead = variantHeader(t)
+    val headMod = if (variantHead != null && t.cls != TicketClass.SPECIAL) Modifier.background(variantHead)
+    else if (t.cls == TicketClass.SPECIAL)
         Modifier.background(Brush.linearGradient(listOf(PETROL, Color(0xFF0E6B7C), PETROL, Color(0xFF0E6B7C)), end = Offset(120f, 0f),
             tileMode = androidx.compose.ui.graphics.TileMode.Repeated))
     else Modifier.background(head)
@@ -245,25 +283,45 @@ private fun Header(t: Ticket) {
     }
 }
 
+/**
+ * VON/NACH-Kopf in drei Zeilen (Bezeichnung, Namen mit Pfeil, Uhrzeiten), damit der Pfeil immer mittig
+ * auf der Namenszeile sitzt - auch im Teilen-Bild ohne Uhrzeiten.
+ * Die Schrift wird so lange verkleinert, bis beide Namen ganz hineinpassen (Burgsteinfurt, De Eschmarke).
+ */
 @Composable
 private fun FromTo(t: Ticket) {
-    Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 14.dp), verticalAlignment = Alignment.Bottom) {
-        Column(Modifier.weight(1f)) {
-            Text("VON", style = SANS.copy(fontSize = 10.sp, color = GREY, letterSpacing = 1.sp))
-            Text(t.from.uppercase(), style = SANS.copy(fontSize = nameSize(t.from, t.to), fontWeight = FontWeight.ExtraBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(t.dep, style = MONO.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold, color = PETROL))
+    val showTimes = LocalShareMode.current?.details != false
+    val from = t.from.uppercase(); val to = t.to.uppercase()
+    val tm = rememberTextMeasurer()
+    val density = LocalDensity.current
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 14.dp)) {
+        val avail = constraints.maxWidth
+        val gap = with(density) { 44.dp.roundToPx() }          // Platz fuer den Pfeil
+        val size = remember(from, to, avail, density) {
+            var s = 20f
+            while (s > 11f) {
+                val st = SANS.copy(fontSize = s.sp, fontWeight = FontWeight.ExtraBold)
+                val w = tm.measure(from, st, maxLines = 1, softWrap = false).size.width +
+                    tm.measure(to, st, maxLines = 1, softWrap = false).size.width
+                if (w + gap <= avail) break
+                s -= 0.5f
+            }
+            s
         }
-        Text("→", style = SANS.copy(fontSize = 22.sp, color = PETROL), modifier = Modifier.padding(horizontal = 6.dp, vertical = 22.dp))
-        Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-            Text("NACH", style = SANS.copy(fontSize = 10.sp, color = GREY, letterSpacing = 1.sp))
-            Text(t.to.uppercase(), style = SANS.copy(fontSize = nameSize(t.from, t.to), fontWeight = FontWeight.ExtraBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(t.arr, style = MONO.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold, color = PETROL))
+        val name = SANS.copy(fontSize = size.sp, fontWeight = FontWeight.ExtraBold)
+        val label = SANS.copy(fontSize = 10.sp, color = GREY, letterSpacing = 1.sp)
+        val time = MONO.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold, color = PETROL)
+        Column(Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth()) { Text("VON", style = label); Spacer(Modifier.weight(1f)); Text("NACH", style = label) }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(from, style = name, maxLines = 1, softWrap = false)
+                Text("→", style = SANS.copy(fontSize = 22.sp, color = PETROL, textAlign = TextAlign.Center), modifier = Modifier.weight(1f).offset(y = (-2).dp))
+                Text(to, style = name, maxLines = 1, softWrap = false)
+            }
+            if (showTimes) Row(Modifier.fillMaxWidth()) { Text(t.dep, style = time); Spacer(Modifier.weight(1f)); Text(t.arr, style = time) }
         }
     }
 }
-
-/** Lange Bahnhofsnamen (Burgsteinfurt, De Eschmarke) kleiner, damit beide in eine Zeile passen. */
-private fun nameSize(a: String, b: String) = (a.length + b.length).let { n -> if (n <= 16) 20.sp else if (n <= 22) 17.sp else 14.sp }
 
 private fun short(n: String) = when (n) {
     "Münster Hbf" -> "Münster"; "Zentrum Nord" -> "Zentr. N."; "Metelen Land" -> "Metelen"; "De Eschmarke" -> "Eschm."
@@ -306,32 +364,24 @@ private fun RouteStrip(t: Ticket) {
     }
 }
 
-/** Abriss-Kante: Doppeltipp knipst ein Loch (hoechstens drei, bleiben gespeichert). */
+/**
+ * Abriss-Kante: Doppeltipp knipst wie die Zange des Zugbegleiters genau ein Loch und druckt Datum und Uhrzeit dazu.
+ * Loch und Kerben werden in [TicketFront] wirklich aus der Karte ausgestanzt; hier nur Perforation und Aufdruck.
+ */
 @Composable
-private fun TearEdge(t: Ticket, paper: Color) {
-    val ctx = LocalContext.current
-    val key = "tk_holes_${t.id}"
-    var holes by remember { mutableStateOf(prefs(ctx).getString(key, "")!!.split(",").mapNotNull { it.toFloatOrNull() }) }
-    val page = Rb.c.background
-    Canvas(Modifier.fillMaxWidth().height(20.dp).pointerInput(t.id) {
-        detectTapGestures(onDoubleTap = { o ->
-            if (holes.size < 3) {
-                holes = holes + (o.x / size.width)
-                prefs(ctx).edit().putString(key, holes.joinToString(",")).apply()
-            }
-        })
-    }) {
-        val y = size.height / 2
-        drawCircle(page, 9.dp.toPx(), Offset(0f, y)); drawCircle(page, 9.dp.toPx(), Offset(size.width, y))
-        drawLine(Color(0xFFD6CFBD), Offset(16.dp.toPx(), y), Offset(size.width - 16.dp.toPx(), y), 2.dp.toPx(),
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 5.dp.toPx())))
-        holes.forEach { f ->
-            // Zangenloch als kleine Raute
-            val cx = f * size.width
-            val p = Path().apply { moveTo(cx, y - 6.dp.toPx()); lineTo(cx + 5.dp.toPx(), y); lineTo(cx, y + 6.dp.toPx()); lineTo(cx - 5.dp.toPx(), y); close() }
-            drawPath(p, page)
-            drawPath(p, Color.Black.copy(alpha = 0.18f), style = Stroke(1.dp.toPx()))
+private fun TearEdge(t: Ticket, punch: Float, onPunch: (Float) -> Unit, onCenterY: (Float) -> Unit) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(20.dp)
+        .onGloballyPositioned { c -> onCenterY(c.positionInParent().y + c.size.height / 2f) }
+        .pointerInput(t.id) {
+            detectTapGestures(onDoubleTap = { o -> if (punch < 0f) onPunch((o.x / size.width).coerceIn(0.1f, 0.55f)) })   // rechts bleibt Platz fuer den Aufdruck
+        }) {
+        Canvas(Modifier.fillMaxSize()) {
+            val y = size.height / 2
+            drawLine(Color(0xFFD6CFBD), Offset(16.dp.toPx(), y), Offset(size.width - 16.dp.toPx(), y), 2.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 5.dp.toPx())))
         }
+        if (punch >= 0f) Text(punchText(t, LocalShareMode.current?.details != false), style = MONO.copy(fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4338CA).copy(alpha = 0.75f)),
+            maxLines = 1, modifier = Modifier.offset(x = maxWidth * punch + 12.dp, y = 9.dp).rotate(-2f).wrapContentSize(unbounded = true))
     }
 }
 
@@ -355,6 +405,7 @@ private fun Stat(label: String, value: String, modifier: Modifier) {
 /** Platzreservierung. Nach rechts wischen zieht den Zettel ab - darunter steht ein Satz. */
 @Composable
 private fun BoxScope.ReservationSlip(t: Ticket) {
+    if (LocalShareMode.current?.details == false) return      // verraet Wochentag und Uhrzeit
     val ctx = LocalContext.current
     val key = "tk_torn_${t.id}"
     var torn by remember { mutableStateOf(prefs(ctx).getBoolean(key, false)) }
@@ -370,9 +421,7 @@ private fun BoxScope.ReservationSlip(t: Ticket) {
         sunday -> "Wagen fehlt heute. Erstattung 1,00 € – in Stempeln."
         t.wear != Wear.NONE -> "Reservierung gilt trotzdem."
         t.cls == TicketClass.FIRST -> "Reservierung inklusive. Getränk nicht."
-        t.crossing != null -> "Aussicht auf Kreuzung inklusive."
-        !t.window -> "Gang. Draußen ist es ohnehin dunkel."
-        else -> "${short(t.from)} → ${short(t.to)}"
+        else -> t.seatNote.ifBlank { "${short(t.from)} → ${short(t.to)}" }
     }
     Column(Modifier.align(Alignment.CenterStart)
         .offset { IntOffset(x.value.roundToInt(), 0) }
@@ -417,15 +466,11 @@ private fun Bottom(t: Ticket) {
             t.specialReason?.let { Text(it, style = SANS.copy(fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = RED)) }
             if (t.ironed) Text("FRISCH GEBÜGELT", style = MONO.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold, color = GREEN),
                 modifier = Modifier.border(1.dp, GREEN, RoundedCornerShape(3.dp)).padding(horizontal = 4.dp))
-            Text("FAHRT ${t.nthInMonth} IM ${t.monthName.uppercase()} · ${t.train.uppercase()}", style = MONO.copy(fontSize = 9.5.sp, color = GREY),
+            Text("FAHRT ${t.nthInMonth} IM ${t.monthName.uppercase()}" + (if (LocalShareMode.current?.details != false) " · ${t.train.uppercase()}" else ""), style = MONO.copy(fontSize = 9.5.sp, color = GREY),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             // seltene Sprueche/Varianten bekommen ein kleines Zeichen hinter der Nummer
-            val mark = listOfNotNull(
-                t.spruchRarity.takeIf { it > Rarity.COMMON }?.let { "✦ Spruch ${it.label}" },
-                t.variant?.let { "✦ ${it.name}" },
-            ).joinToString(" · ")
-            Text("Nr. ${t.serial}" + (if (mark.isNotEmpty()) "  $mark" else ""), style = MONO.copy(fontSize = 9.sp, color = Color(0xFF9CA3AF)),
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // Seltenheit steht bewusst nicht auf der Karte - sie zeigt sich nur im Stempelheft
+            if (LocalShareMode.current == null) Text("Nr. ${t.serial}", style = MONO.copy(fontSize = 9.sp, color = Color(0xFF9CA3AF)), maxLines = 1)
         }
         Spacer(Modifier.width(8.dp))
         EntwerterStamp(t)
@@ -530,7 +575,7 @@ private fun TicketBack(t: Ticket) {
         Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("RÜCKSEITE", style = SANS.copy(fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp, color = PETROL), modifier = Modifier.weight(1f))
-                Text("Nr. ${t.serial}", style = MONO.copy(fontSize = 10.sp, color = Color(0xFF9CA3AF)))
+                if (LocalShareMode.current == null) Text("Nr. ${t.serial}", style = MONO.copy(fontSize = 10.sp, color = Color(0xFF9CA3AF)))
             }
             val rows = buildList {
                 add("Fahrzeit" to "${t.minutes} min"); add("Strecke" to "%.0f km".format(t.km))
@@ -547,7 +592,7 @@ private fun TicketBack(t: Ticket) {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { BeilegerView(t, t.beileger) }
             }
             Spacer(Modifier.weight(1f))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            if (LocalShareMode.current?.details != false) Row(verticalAlignment = Alignment.CenterVertically) {
                 StationClock(t)
                 Spacer(Modifier.width(12.dp))
                 Column {
@@ -613,7 +658,7 @@ private fun BeilegerView(t: Ticket, b: Beileger) {
             .clip(RoundedCornerShape(6.dp)).background(Brush.linearGradient(listOf(Color(0xFFF3DC8A), Color(0xFFC9A15E), Color(0xFFE8C77E))))
             .padding(vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("STAMMPLATZ", style = SANS.copy(fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp, color = Color(0xFF3B2A0E)))
-            Text(b.label, style = SANS.copy(fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF3B2A0E)))
+            Text(if (LocalShareMode.current?.details == false) "Stammgast" else b.label, style = SANS.copy(fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF3B2A0E)))
             Text("Nicht reservierbar, nur verdient.", style = SANS.copy(fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF3B2A0E)))
         }
         is Beileger.Fahrgastrechte -> {
@@ -632,6 +677,19 @@ private fun BeilegerView(t: Ticket, b: Beileger) {
                     b.delay >= 60 -> "Anspruch: 25 % des Fahrpreises. Bitte wirklich beantragen."
                     else -> "Anspruch ab 60 min (25 %). Ihnen fehlen noch ${60 - b.delay} min."
                 }, style = MONO.copy(fontSize = 8.5.sp, color = GREY))
+                // ab 60 min echter Anspruch: Antrag bei der DB (Frist 3 Monate nach der Fahrt)
+                if (b.delay >= 60) {
+                    val left = (t.started + 92L * 86_400_000L - System.currentTimeMillis()) / 86_400_000L
+                    if (left > 0) Text("Bei der DB beantragen (noch $left Tage) →", style = MONO.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PETROL),
+                        modifier = Modifier.padding(top = 6.dp).clickable {
+                            runCatching {
+                                ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("https://www.bahn.de/service/fahrplaene/fahrgastrechte/entschaedigung"))
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                            }
+                        }.padding(vertical = 6.dp))
+                    else Text("Frist von 3 Monaten ist abgelaufen.", style = MONO.copy(fontSize = 8.5.sp, color = GREY), modifier = Modifier.padding(top = 4.dp))
+                }
             }
         }
         is Beileger.Zugbindung -> Column(Modifier.rotate(-8f).border(3.dp, RED.copy(alpha = 0.85f), RoundedCornerShape(6.dp))
@@ -645,7 +703,7 @@ private fun BeilegerView(t: Ticket, b: Beileger) {
             Box(Modifier.fillMaxWidth().height(5.dp).background(Color(0xFFF59E0B)))
             Column(Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
                 Text("KREUZUNGSAUFTRAG · ${b.station.uppercase()}", style = MONO.copy(fontSize = 8.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp))
-                Row { Text("${t.train} → ", style = MONO.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold))
+                Row { Text("${if (LocalShareMode.current?.details == false) "RB64" else t.train} → ", style = MONO.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold))
                     Text("⇄", style = MONO.copy(fontSize = 11.sp, color = Color(0xFFF59E0B)))
                     Text(" ← Gegenzug", style = MONO.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f))
                     Text("${b.minutes} min", style = MONO.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold)) }
@@ -687,26 +745,56 @@ private fun BeilegerView(t: Ticket, b: Beileger) {
     }
 }
 
-/* ================================================================== Kippen */
+/* ================================================================== Teilen */
 
-/** 0..1: wie stark das flach gehaltene Handy gekippt ist (fuer das Wasserzeichen). Nur solange die Karte offen ist. */
+private val SHARE_BG = Color(0xFFE9EDF1)
+private const val SHARE_W = 1080
+
+/** Ein Teilen-Bild: Karte (Vorder- oder Rueckseite) auf hellem Grund, darunter klein "RB64 Live" und der Monat. */
 @Composable
-private fun rememberTilt(): androidx.compose.runtime.State<Float> {
-    val ctx = LocalContext.current
-    val v = remember { mutableFloatStateOf(0f) }
-    DisposableEffect(Unit) {
-        val sm = ctx.getSystemService(SensorManager::class.java)
-        val sensor = sm?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-        val l = object : SensorEventListener {
-            override fun onSensorChanged(e: SensorEvent) {
-                val (x, y, z) = Triple(e.values[0], e.values[1], e.values[2])
-                val flat = z > 6.5f
-                v.floatValue = if (!flat) 0f else ((sqrt(x * x + y * y) - 1.2f) / 3f).coerceIn(0f, 1f)
+private fun TicketShareImage(t: Ticket, back: Boolean, details: Boolean) {
+    val month = SimpleDateFormat("MMMM yyyy", Locale.GERMANY).format(Date(t.started))
+    val day = SimpleDateFormat("d. MMMM yyyy", Locale.GERMANY).format(Date(t.started))
+    SharedContent(details) {
+        Column(Modifier.fillMaxSize().background(SHARE_BG).padding(24.dp)) {
+            Box(Modifier.fillMaxWidth().weight(1f)) { if (back) TicketBack(t) else TicketFront(t) }
+            Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("RB64 Live", style = SANS.copy(fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = PETROL), modifier = Modifier.weight(1f))
+                Text(if (details) day else month, style = SANS.copy(fontSize = 13.sp, color = GREY))
             }
-            override fun onAccuracyChanged(s: Sensor?, a: Int) {}
         }
-        if (sensor != null) sm.registerListener(l, sensor, SensorManager.SENSOR_DELAY_UI)
-        onDispose { sm?.unregisterListener(l) }
     }
-    return v
+}
+
+/** Teilen-Dialog fuer eine Fahrkarte: Vorderseite oder beide Seiten (als zwei Bilder). */
+@Composable
+fun TicketShareSheet(t: Ticket, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    val density = LocalDensity.current
+    var both by remember { mutableStateOf(false) }
+    var details by remember { mutableStateOf(false) }
+    // Hoehe aus der Breite: Karte 380:480, dazu Rand und Fusszeile
+    val hPx = with(density) {
+        val w = SHARE_W.toDp() - 48.dp
+        (w * (480f / 380f) + 48.dp + 34.dp).roundToPx()
+    }
+    val front = remember(details) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    val back = remember(details, both) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    ShareFrame(
+        title = "Fahrkarte teilen",
+        choices = listOf("Vorderseite", "Beide Seiten"), choice = if (both) 1 else 0, onChoice = { both = it == 1 },
+        details = details, onDetails = { details = it },
+        summary = if (details) "Du teilst die Karte mit Datum, Uhrzeiten, Zugnummer und Platz. Die Seriennummer bleibt weg."
+        else "Du teilst Strecke, Fahrzeit, km, Spruch und Stempel mit dem Monat – ohne Datum, Uhrzeiten, Zugnummer und Platz.",
+        ready = front.value != null && (!both || back.value != null),
+        onShare = {
+            val list = listOfNotNull(front.value, if (both) back.value else null)
+            runCatching { Sharing.send(ctx, Sharing.save(ctx, list)) }
+            onClose()
+        },
+        onClose = onClose,
+    ) {
+        key(details) { Capture(SHARE_W, hPx, if (both) 150.dp else 240.dp, onBitmap = { front.value = it }) { TicketShareImage(t, back = false, details = details) } }
+        if (both) key(details, "back") { Capture(SHARE_W, hPx, 150.dp, onBitmap = { back.value = it }) { TicketShareImage(t, back = true, details = details) } }
+    }
 }

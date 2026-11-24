@@ -95,6 +95,7 @@ class MainActivity : ComponentActivity() {
         refresh(this)                       // beim Oeffnen frische Daten anfordern
         setContent { ThemedRoot(this) }
         if (intent?.getBooleanExtra("summary", false) == true) UiRequests.summary.value = true
+        if (intent?.getBooleanExtra("review", false) == true) UiRequests.review.value = true
         if (intent?.getBooleanExtra("checkin", false) == true) UiRequests.checkin.value = intent.getStringExtra("train")
         else intent?.getStringExtra("train")?.let {
             UiRequests.openRel.value = intent.getStringExtra("rel")
@@ -114,6 +115,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra("summary", false)) UiRequests.summary.value = true
+        if (intent.getBooleanExtra("review", false)) UiRequests.review.value = true
         if (intent.getBooleanExtra("checkin", false)) UiRequests.checkin.value = intent.getStringExtra("train")
         else intent.getStringExtra("train")?.let {
             UiRequests.openRel.value = intent.getStringExtra("rel")
@@ -133,6 +135,8 @@ object UiRequests {
     val openRide = androidx.compose.runtime.mutableStateOf<String?>(null)
     /** "Ich fahre mit" aus dem Live Update des angehefteten Zugs (Zugnummer). */
     val checkin = androidx.compose.runtime.mutableStateOf<String?>(null)
+    /** Monatsrueckblick oeffnen (aus der Meldung am 1.). */
+    val review = androidx.compose.runtime.mutableStateOf(false)
 }
 
 /** Aktualisieren anstossen: Anzeige "Aktualisiere …" in App und Widget, Antwort kommt per Firebase. */
@@ -202,6 +206,9 @@ private fun AppRoot() {
     val ride by de.rb64.live.ride.RideStore.state.collectAsState()
     var tab by remember { mutableIntStateOf(TAB_DEP) }
     var summaryReq by UiRequests.summary
+    // Meldung "Dein Oktober ist da" -> Fahrten oeffnen, dort startet der Rueckblick
+    val reviewReq by UiRequests.review
+    LaunchedEffect(reviewReq) { if (reviewReq) tab = TAB_RIDES }
     LaunchedEffect(summaryReq) {
         if (summaryReq) { tab = TAB_RIDES; UiRequests.openRide.value = de.rb64.live.ride.RideStore.history.value.firstOrNull()?.id; summaryReq = false }
     }
@@ -546,13 +553,26 @@ private fun RidesScreen(ride: de.rb64.live.ride.RideState?, onGoDepartures: () -
     }
     val open = remember(openId, rides) { openId?.let { de.rb64.live.ride.RideStore.load(ctx, it) } }
     var book by remember { mutableStateOf(false) }
+    var review by remember { mutableStateOf<de.rb64.live.ride.MonthReviews.Pending?>(null) }
+    var reviewReq by UiRequests.review
+    LaunchedEffect(reviewReq, rides) {
+        if (reviewReq && rides.isNotEmpty()) { review = de.rb64.live.ride.MonthReviews.pending(rides); reviewReq = false }
+    }
     BackHandler(enabled = ride == null && open != null) { openId = null }
     BackHandler(enabled = ride == null && open == null && book) { book = false }
     when {
         ride != null -> de.rb64.live.ride.RideScreen(ride)
         open != null -> de.rb64.live.ride.SummaryScreen(open, onBack = { openId = null })
         book -> de.rb64.live.ride.StampBookScreen(rides, onBack = { book = false })
-        else -> de.rb64.live.ride.RideListScreen(rides, onOpen = { openId = it }, onGoDepartures = onGoDepartures, onOpenBook = { book = true })
+        else -> de.rb64.live.ride.RideListScreen(rides, onOpen = { openId = it }, onGoDepartures = onGoDepartures, onOpenBook = { book = true },
+            onOpenReview = { review = it })
+    }
+    // Monatsrueckblick bildschirmfuellend als Story
+    review?.let { p ->
+        androidx.compose.ui.window.Dialog(onDismissRequest = { review = null },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+            de.rb64.live.ride.MonthReviewScreen(p, rides, onClose = { review = null })
+        }
     }
 }
 

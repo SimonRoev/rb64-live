@@ -87,5 +87,15 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/rb64_widget_small_info" />
         </receiver>
+        <!-- Teilen von Fahrkarte/Rueckblick: Bild im Zwischenspeicher, nur fuer das Ziel der Teilen-Auswahl lesbar -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.share"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/share_paths" />
+        </provider>
     </application>
 </manifest>

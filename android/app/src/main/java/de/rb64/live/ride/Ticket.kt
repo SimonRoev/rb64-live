@@ -43,6 +43,7 @@ data class Ticket(
     /** Letzte fruehere Fahrt mit gleichem Wagen und Platz (Gimmick an der Klassen-Ziffer). */
     val seatSeen: Long?,
     val spruchRarity: Rarity = Rarity.COMMON, val variant: Variant? = null,
+    val doodle: Boolean = false, val seatNote: String = "",
     val weather: List<String> = emptyList(), val planMinutes: Int? = null,
 ) {
     val border get() = stops.contains("Glanerbrug")
@@ -213,7 +214,7 @@ object Tickets {
             weather = i.weather, minutes = minutes, planMinutes = planMinutes, rides = older.size, mirrored = mirrored,
         )
         val line = Extras.line(ctx, i.id, facts)
-        val variant = Extras.variant(ctx, i.id)
+        val variant = Extras.variant(ctx, i.id, facts)
         val digits = i.train.substringAfterLast(' ').filter { it.isDigit() }.ifBlank { "0" }
         val arrPlanEpoch = arrM?.let { a -> arrPlan?.let { minuteOfDay(it) }?.let { pm ->
             cal(a).apply { set(Calendar.HOUR_OF_DAY, pm / 60); set(Calendar.MINUTE, pm % 60); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis } }
@@ -230,6 +231,7 @@ object Tickets {
                 weekday(m.started) == wagen && (cal(m.started).get(Calendar.MINUTE) + lineBetween(m.from, m.to).size - 1) == platz
             }?.started,
             spruchRarity = line.rarity, variant = variant, weather = i.weather, planMinutes = planMinutes,
+            doodle = Extras.doodle(ctx, i.id), seatNote = Extras.seatNote(i.id, facts),
         )
     }
 
@@ -259,16 +261,20 @@ object Tickets {
         if (t.weather.isNotEmpty() && (t.delay ?: 99) <= 5) add("wetterfest")
         if (t.beileger is Beileger.Kontrolle) add("kontrolle")
         if (t.planMinutes != null && t.planMinutes > 0 && (t.delay ?: 0) > t.planMinutes) add("geduld")
-        when (t.variant?.id) { "double" -> add("doppel"); "misprint" -> add("fehldruck") }
     }
 
-    data class Book(val stations: Map<String, Int>, val specials: Set<String>, val knitter: Int)
+    /** Stempelheft: Stempel je Bahnhof, Sonderstempel, gefundene Varianten (id -> Anzahl), Kritzelkarten, Fahrten, Verspaetungsminuten. */
+    data class Book(val stations: Map<String, Int>, val specials: Set<String>, val knitter: Int,
+                    val variants: Map<String, Int> = emptyMap(), val doodles: Int = 0, val rides: Int = 0, val delayMinutes: Int = 0)
 
     /** Stempelheft aus allen Fahrten (laedt jede Fahrt einmal - im Hintergrund aufrufen). */
     fun book(ctx: Context, history: List<RideMeta>): Book {
         val counts = mutableMapOf<String, Int>()
         val specials = mutableSetOf<String>()
         var knitter = 0
+        val variants = mutableMapOf<String, Int>()
+        var doodles = 0
+        var delayMin = 0
         history.forEach { m ->
             lineBetween(m.from, m.to).forEach { counts[it] = (counts[it] ?: 0) + 1 }
             RideStore.load(ctx, m.id)?.let { s ->
@@ -276,8 +282,11 @@ object Tickets {
                 val sp = specialsOf(t)
                 specials += sp
                 if ("knitter" in sp) knitter++
+                t.variant?.let { v -> variants[v.name] = (variants[v.name] ?: 0) + 1 }
+                if (t.doodle) doodles++
             }
+            delayMin += (m.arrDelta ?: 0).coerceIn(0, 60)   // je Fahrt hoechstens 60 min (GeduldsCard)
         }
-        return Book(counts, specials, knitter)
+        return Book(counts, specials, knitter, variants, doodles, history.size, delayMin)
     }
 }

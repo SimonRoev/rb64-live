@@ -205,6 +205,8 @@ private fun ColumnScope.PageRide() {
         "„Live-Position teilen“ an, teilt jede Fahrt automatisch mit – dafür siehst du andere Mitfahrer live.")
     Bullet(RbIcons.signal, "Unterwegs melden", "Funkloch oder voller Zug? Mit einem Tipp in der Meldung festhalten. Deine Fahrten helfen, die Prognose zu verbessern.")
     Bullet(RbIcons.rides, "Automatisch", "Stehst du an deinem Bahnhof, fragt die App, ob du mitfährst – „Los“ geht direkt vom Sperrbildschirm.")
+    Bullet(RbIcons.trend, "Fahrkarte und Rückblick", "Nach jeder Fahrt gibt es eine Fahrkarte zum Sammeln, unter „Fahrten“ dein Stempelheft. " +
+        "Fährst du in einem Monat mindestens 8-mal mit, kommt am 1. dein Monatsrückblick.")
 }
 
 @Composable
@@ -230,6 +232,9 @@ private fun ColumnScope.PagePrivacy() {
     Bullet(RbIcons.live, "Live-Position nur, wenn du sie teilst",
         "Freiwillig und standardmäßig aus: Während du mitfährst, sendet die App alle 30 s nur, wo auf der Strecke dein Zug ist " +
             "und wie schnell er fährt – ohne Koordinaten, anonym. Das sehen nur andere, die selbst teilen; am Fahrtende wird es gelöscht.")
+    Bullet(RbIcons.announce, "Teilen nur, wenn du es willst",
+        "Fahrkarte, Stempelheft und Rückblick entstehen auf deinem Handy. Teilst du eine Karte als Bild, siehst du vorher genau, was drauf ist – " +
+            "Uhrzeiten, Datum, Zug und Platz nur, wenn du sie einschaltest.")
     Bullet(RbIcons.location, "Standort am Bahnhof wird nicht gespeichert",
         "Für den Mitfahr-Vorschlag meldet Android der App nur „du bist am Bahnhof X“. Der Standort wird dabei weder gespeichert noch gesendet.")
     Bullet(RbIcons.lock, "Wo die Daten liegen",

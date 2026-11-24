@@ -26,6 +26,8 @@ class PushService : FirebaseMessagingService() {
         Notifier.onPayload(applicationContext, snap)
         Notifier.onPinned(applicationContext, snap)
         de.rb64.live.ride.RideService.refresh(applicationContext)
+        // am 1. des Monats einmal: "Dein Oktober ist da" (kostet nichts, wenn nicht faellig)
+        runCatching { de.rb64.live.ride.MonthReviews.notifyIfDue(applicationContext) }
     }
 
     override fun onNewToken(token: String) {

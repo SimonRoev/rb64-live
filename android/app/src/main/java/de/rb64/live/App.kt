@@ -11,6 +11,8 @@ class App : Application() {
         super.onCreate()
         Notifier.createChannels(this)
         de.rb64.live.ride.RideService.createChannel(this)
+        de.rb64.live.ride.MonthReviews.createChannel(this)
+        runCatching { de.rb64.live.ride.Sharing.cleanup(this) }   // alte Teilen-Bilder aus dem Zwischenspeicher
         de.rb64.live.ride.RideStore.init(this)
         de.rb64.live.ride.Fences.sync(this)
         // Rueckfallebene: alle 15 min (Android-Minimum) frische Daten anfordern und Widget neu zeichnen
