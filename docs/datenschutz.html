@@ -24,7 +24,7 @@
 <main class="wrap">
   <article class="doc">
     <h1>Datenschutzerklärung</h1>
-    <p>für die Android-App „RB64 Live“ · Stand: 24. November 2026</p>
+    <p>für die Android-App „RB64 Live“ · Stand: 25. November 2026</p>
 
     <h2>Verantwortlich</h2>
     <p>Simon Rövekamp<br>
@@ -44,13 +44,14 @@
     <p>Damit der Server dir aktuelle Zugdaten schicken kann, meldet sich die App beim Start anonym bei Google Firebase an.
       Dabei entsteht eine zufällige Kennung; Name, E-Mail oder Telefonnummer werden nicht abgefragt.
       Gespeichert werden diese Kennung, das Push-Token deines Geräts (Firebase Cloud Messaging), der Zeitpunkt,
-      zu dem du zuletzt neue Daten angefordert hast, und – wenn du einen Zug anheftest – <strong>bis wann</strong> er angeheftet
-      ist (nicht welcher Zug). Dann schickt der Server neue Daten mit hoher Priorität, damit Meldungen zu deinem Zug auch bei
+      zu dem du zuletzt neue Daten angefordert hast, und – wenn du einen Zug anheftest – ein <strong>grobes Zeitfenster</strong>
+      (auf die volle Stunde gerundet, plus eine Stunde), bis zu dem ein Zug angeheftet ist – nicht welcher Zug und nicht, wann
+      du ihn wieder löst. Dann schickt der Server neue Daten mit hoher Priorität, damit Meldungen zu deinem Zug auch bei
       gesperrtem Handy sofort ankommen.</p>
     <p>Zweck: Zustellung der Zugdaten an die App. Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO (Bereitstellung der von dir genutzten App).</p>
 
     <h2>2. Aufgezeichnete Fahrten</h2>
-    <p>Nur wenn du bei einem Zug „Ich fahre mit“ wählst, zeichnet die App per GPS auf. Gespeichert werden:</p>
+    <p>Nur wenn du bei einem Zug „Ich fahre mit“ wählst (oder „Automatisch aufzeichnen“ eingeschaltet hast, siehe unten), zeichnet die App per GPS auf. Gespeichert werden:</p>
     <ul>
       <li>Positionen mit Zeit, Geschwindigkeit und Genauigkeit – <strong>nur innerhalb des Bahnkorridors</strong>; Punkte abseits der Strecke werden verworfen,</li>
       <li>daraus erkannte Halte, deine Markierungen (z. B. „vor Signal“, „sehr voll“),</li>
@@ -68,18 +69,28 @@
       unseren Server. Vorher siehst du eine Vorschau. Uhrzeiten, Datum, Zugnummer und Platz sind nur auf dem Bild, wenn du
       „Details zeigen“ einschaltest; einen Standort enthält es nie. Was die gewählte App mit dem Bild macht, richtet sich nach deren
       Datenschutzbestimmungen.</p>
-    <p>Brichst du die Aufzeichnung ab, bevor der Zug losfährt, wird nichts gespeichert. Nach der Fahrt wird sie zusammen mit
-      der anonymen Kennung an unseren Server übertragen. Dort wird sie ausgewertet, um die Verspätungsprognose für die RB64 zu
-      verbessern (z. B. wo Züge vor Signalen warten). Auf dem Server wird die Kennung nur als gekürzter Hashwert gespeichert.</p>
-    <p>Rechtsgrundlage: Art. 6 Abs. 1 lit. a DSGVO (deine Einwilligung durch das Starten der Aufzeichnung).</p>
+    <p>Brichst du die Aufzeichnung ab, bevor du wirklich mit dem Zug gefahren bist (also bevor er dich zum nächsten Halt
+      gebracht hat), wird nichts gespeichert. Nach der Fahrt wird sie zusammen mit der anonymen Kennung an unseren Server
+      übertragen – <strong>nur die eigentliche Zugfahrt</strong> (ab einer Minute vor der Abfahrt bis eine Minute nach der Ankunft),
+      der Weg zum und vom Bahnhof bleibt auf deinem Handy. Dort wird sie ausgewertet, um die Verspätungsprognose für die RB64 zu
+      verbessern (z. B. wo Züge vor Signalen warten). Auf dem Server wird die Kennung nur als gekürzter Hashwert gespeichert.
+      Das ist eine Pseudonymisierung, keine Anonymisierung: Fahrten, Feedback und Gerät mit derselben Kennung gehören zusammen.</p>
+    <p><strong>Automatisch aufzeichnen (freiwillig, standardmäßig aus):</strong> Schaltest du es ein, startet die Aufzeichnung
+      von selbst, wenn du am Bahnhof bist und dein angehefteter Zug in den nächsten 20 Minuten abfährt. Steigst du nicht ein
+      (du verlässt den Bahnhof oder der Zug ist weg), wird die Aufzeichnung verworfen – dann wird nichts gespeichert oder übertragen.</p>
+    <p>Rechtsgrundlage: Art. 6 Abs. 1 lit. a DSGVO (deine Einwilligung durch das Starten der Aufzeichnung bzw. durch das
+      Einschalten von „Automatisch aufzeichnen“).</p>
 
     <h2>2a. Live-Position teilen (freiwillig)</h2>
     <p>Schaltest du in der App „Live-Position teilen“ ein (Einstellungen › Mitfahren oder in der Einführung), sendet die App
-      <strong>nur während einer Fahrt mit „Ich fahre mit“</strong> etwa alle 30 Sekunden: die Zugnummer, die Position des
-      Zugs auf der Strecke als Wert zwischen zwei Halten (z. B. „zwischen Ochtrup und Metelen Land“), die Geschwindigkeit und
-      den Zeitpunkt. <strong>GPS-Koordinaten werden dabei nicht übertragen</strong>; die Umrechnung geschieht auf deinem Handy.
+      <strong>nur während einer Fahrt</strong> (mit „Ich fahre mit“ oder automatisch gestartet, siehe 2) etwa alle 30 Sekunden: die Zugnummer, die Position des
+      Zugs auf der Strecke als Wert zwischen zwei Halten (z. B. „zwischen Ochtrup und Metelen Land“) und den Zeitpunkt. <strong>GPS-Koordinaten werden dabei nicht übertragen</strong>; die Umrechnung geschieht auf deinem Handy.
       Die Angaben liegen in Google Firebase unter deiner anonymen Kennung und werden am Ende der Fahrt gelöscht, spätestens nach
       15 Minuten ohne neue Position. Zusätzlich wird bei deiner Kennung vermerkt, dass du teilst.</p>
+    <p>Damit wir die Plausibilitätsprüfung kontrollieren können, speichert unser Server die gemeldeten Positionen
+      (Zug, Position, Zeit) <strong>höchstens 2 Tage</strong> – nicht mit deiner Kennung, sondern mit einer Kennung, die
+      jeden Tag wechselt. So lassen sich Meldungen nicht über Tage hinweg oder mit deinen Fahrten und deinem Feedback verknüpfen.
+      Den Vermerk „teilt“ löschen wir 30 Tage nach deiner letzten geprüften Position.</p>
     <p>Unser Server leitet die Zugpositionen – ohne Kennung – nur an Geräte weiter, die selbst teilen. Daraus ist nicht
       erkennbar, wer mitfährt. Ausschalten kannst du das jederzeit in den Einstellungen.</p>
     <p>Rechtsgrundlage: Art. 6 Abs. 1 lit. a DSGVO (deine Einwilligung durch das Einschalten).</p>
@@ -87,7 +98,8 @@
     <h2>3. Mitfahr-Vorschlag am Bahnhof</h2>
     <p>Wenn du diese Funktion einschaltest, legt die App über die Google-Play-Dienste Bereiche um die Bahnhöfe deiner Strecken
       fest (Geofencing). Android meldet der App nur „du bist seit einer Minute am Bahnhof X“. Dein Standort wird dafür
-      <strong>weder gespeichert noch übertragen</strong>. Die Funktion braucht die Berechtigung „Standort immer zulassen“
+      <strong>weder gespeichert noch übertragen</strong>; die App merkt sich auf dem Handy nur, an welchem Bahnhof sie dir
+      zuletzt etwas vorgeschlagen hat, damit der Vorschlag nicht ständig kommt. Die Funktion braucht die Berechtigung „Standort immer zulassen“
       und lässt sich jederzeit in der App oder in den Android-Einstellungen abschalten.</p>
 
     <h2>4. Was auf dem Handy bleibt</h2>
@@ -110,16 +122,22 @@
     <ul>
       <li><strong>Fahrten:</strong> bis du sie löschst. In der App unter Fahrten → Fahrt → „Fahrt löschen …“ wählst du
         „Überall löschen“ (Messpunkte, Halte und Markierungen werden auch auf dem Server entfernt, in der Regel innerhalb
-        einer Minute; übrig bleibt nur ein Vermerk mit Zug, Strecke und Datum, dass die Fahrt gelöscht wurde) oder
+        einer Minute; übrig bleibt nur ein Vermerk mit Zug, Strecke und Datum ohne deine Kennung, dass die Fahrt gelöscht
+        wurde – das klappt dank eines Löschschlüssels in der Fahrt auch nach einem Handywechsel) oder
         „Nur auf dem Handy“ (die Fahrt bleibt anonym auf dem Server und wird weiter ausgewertet).</li>
-      <li><strong>Live-Position:</strong> bis zum Ende der Fahrt, spätestens 15 Minuten nach der letzten Position.</li>
-      <li><strong>Kennung und Push-Token:</strong> solange die App installiert ist. Nach dem Deinstallieren wird das Token ungültig.</li>
+      <li><strong>Live-Position:</strong> in Firebase bis zum Ende der Fahrt, spätestens 15 Minuten nach der letzten Position;
+        auf unserem Server ohne deine Kennung höchstens 2 Tage (siehe 2a).</li>
+      <li><strong>Kennung und Push-Token:</strong> solange die App installiert ist. Nach dem Deinstallieren wird das Token ungültig;
+        Geräte, die sich 120 Tage nicht gemeldet haben, löschen wir.</li>
+      <li><strong>Sicherungen unseres Servers:</strong> Die Datenbank wird verschlüsselt gesichert; ältere Sicherungen werden nach
+        spätestens 5 Wochen gelöscht. Bis dahin können dort auch schon gelöschte Fahrten noch enthalten sein.</li>
     </ul>
 
     <h2>6a. Feedback aus der App</h2>
     <p>Schickst du über „Feedback senden“ eine Nachricht, werden dein Text, die anonyme Kennung, der Zeitpunkt und – nur wenn
       du das Häkchen setzt – App-Version und Handy-Modell gespeichert; bei Feedback zu einer Fahrt auch Zug, Strecke und Datum
-      dieser Fahrt. Das Feedback landet in Firebase und auf unserem Server, und der Entwickler bekommt eine Benachrichtigung.
+      dieser Fahrt. Das Feedback geht über Firebase an unseren Server (in Firebase wird es danach gelöscht), und der Entwickler
+      bekommt eine Benachrichtigung.
       Name oder Mail werden nicht mitgeschickt, außer du schreibst sie selbst in den Text. Rechtsgrundlage: Art. 6 Abs. 1
       lit. a DSGVO (du schickst es selbst ab). Gespeichert bis es erledigt ist; auf Wunsch löschen wir es früher.</p>
 
