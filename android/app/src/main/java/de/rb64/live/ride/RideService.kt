@@ -118,21 +118,20 @@ class RideService : Service() {
     }
 
     /**
-     * Live-Position teilen (falls eingeschaltet): erst nach der Abfahrt am Einstieg und nur bis zur Abfahrt am vorletzten
-     * Halt - so verraten weder Warten am Bahnsteig noch der Ausstieg, wo jemand ein- und aussteigt. Mit den gerade
-     * berechneten Halten und zusaetzlich hart nach der Position: wurde der Halt am vorletzten Bahnhof nicht erkannt,
-     * endet das Teilen trotzdem dort und nicht erst am Ziel.
+     * Live-Position teilen (falls eingeschaltet): erst nach der Abfahrt am Einstieg (Warten am Bahnsteig ist keine
+     * Zugposition) und bis der Zug am Ziel einfaehrt - der Weg danach wird nie gesendet. Mit den erkannten Halten und
+     * zusaetzlich hart nach der Position: wurde die Ankunft am Ziel nicht erkannt, endet das Teilen trotzdem dort.
+     * (Spaeter vielleicht: Ende/Start zufaellig ein paar Halte frueher/spaeter, solange es wenige Teilende gibt.)
      */
     private fun shareLive(s: RideState, l: android.location.Location?) {
         val deps = Analyzer.departures(s.events)
-        val beforeLast = s.info.stops.getOrNull(s.info.stops.size - 2)
         val here = l?.let { de.rb64.live.LiveGps.seqAt(it.latitude, it.longitude) }
-        val limit = beforeLast?.let { de.rb64.live.LiveCard.seqOf(it).toDouble() }
-        val pastLimit = here != null && limit != null && limit > 0 && progress(s, here) >= progress(s, limit) - 0.05
+        val limit = de.rb64.live.LiveCard.seqOf(s.info.to).toDouble()
+        val pastLimit = here != null && limit > 0 && progress(s, here) >= progress(s, limit) - 0.05
+        val arrived = s.events.any { it.station == s.info.to }
         // im Zug: entweder schon sicher eingestiegen oder gerade mit Zugtempo unterwegs (gleich nach der Abfahrt)
         val moving = isBoarded(s) || ((Analyzer.speedKmh(s.points) ?: 0) >= 25 && depAtTrainTime(this, s))
-        val sharing = deps.containsKey(s.info.from) && beforeLast != null && beforeLast != s.info.from &&
-            !deps.containsKey(beforeLast) && !pastLimit && moving
+        val sharing = deps.containsKey(s.info.from) && s.info.to != s.info.from && !arrived && !pastLimit && moving
         if (sharing && l != null && Stations.inCorridor(l.latitude, l.longitude))
             de.rb64.live.LiveGps.onLocation(this, s.info.train, l.latitude, l.longitude)
         else if (!sharing && liveWasOn) de.rb64.live.LiveGps.stop()

@@ -1,10 +1,10 @@
 {
-  "versionCode": 16,
-  "versionName": "0.16",
+  "versionCode": 17,
+  "versionName": "0.16.1",
   "date": "2026-11-25",
   "url": "https://simonroev.github.io/rb64-live/download/rb64-live.apk",
   "page": "https://simonroev.github.io/rb64-live/#download",
-  "sha256": "4fc5327feaf5e690de5eba20ab98f02d5f37107f0bd85777ac382eb23355ca74",
-  "size": 6417169,
+  "sha256": "6f75cc61664eb91d6d8f3e31c6e57d544c704a76ad74f923b84ec8c6fae4134c",
+  "size": 6417165,
   "notes": "Alle Karten auf einen Blick, automatisch aufzeichnen, sparsamer mit Daten, App fünfmal kleiner"
 }

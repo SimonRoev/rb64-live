@@ -106,8 +106,7 @@ object LiveGps {
 /** Snapshot mit Live-Positionen: Zugposition aus GPS statt aus Fahrplan/Echtzeit, markiert als gps. */
 fun Snapshot.withLiveGps(ctx: Context): Snapshot {
     val live = LiveGps.positions(ctx).mapValues { it.value.seq }.toMutableMap()
-    // eigene Fahrt: immer die eigene GPS-Position zeigen, bis zum Ziel - nur auf diesem Handy, es wird nichts gesendet
-    // (das Teilen endet absichtlich am vorletzten Halt, damit niemand den Ausstieg sieht)
+    // eigene Fahrt: immer die eigene GPS-Position zeigen, bis zum Ziel (auch ohne Teilen - nur auf diesem Handy)
     de.rb64.live.ride.RideStore.state.value?.let { s ->
         val p = s.points.lastOrNull()
         if (p != null && System.currentTimeMillis() - p.t < 60_000L && de.rb64.live.ride.RideService.isDeparted(s))
