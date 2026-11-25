@@ -46,7 +46,8 @@
       Gespeichert werden diese Kennung, das Push-Token deines Geräts (Firebase Cloud Messaging), der Zeitpunkt,
       zu dem du zuletzt neue Daten angefordert hast, und – wenn du einen Zug anheftest – ein <strong>grobes Zeitfenster</strong>
       (auf die volle Stunde gerundet, plus eine Stunde), bis zu dem ein Zug angeheftet ist – nicht welcher Zug und nicht, wann
-      du ihn wieder löst. Dann schickt der Server neue Daten mit hoher Priorität, damit Meldungen zu deinem Zug auch bei
+      du ihn wieder löst. Wann du anheftest, sieht der Server am Zeitpunkt dieser Meldung; zusammen mit dem Fenster grenzt
+      das die möglichen Züge zwar ein, eindeutig ist es aber nicht. Dann schickt der Server neue Daten mit hoher Priorität, damit Meldungen zu deinem Zug auch bei
       gesperrtem Handy sofort ankommen.</p>
     <p>Zweck: Zustellung der Zugdaten an die App. Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO (Bereitstellung der von dir genutzten App).</p>
 
@@ -72,9 +73,11 @@
     <p>Brichst du die Aufzeichnung ab, bevor du wirklich mit dem Zug gefahren bist (also bevor er dich zum nächsten Halt
       gebracht hat), wird nichts gespeichert. Nach der Fahrt wird sie zusammen mit der anonymen Kennung an unseren Server
       übertragen – <strong>nur die eigentliche Zugfahrt</strong> (ab einer Minute vor der Abfahrt bis eine Minute nach der Ankunft),
-      der Weg zum und vom Bahnhof bleibt auf deinem Handy. Dort wird sie ausgewertet, um die Verspätungsprognose für die RB64 zu
+      der Weg zum und vom Bahnhof bleibt auf deinem Handy. Lässt sich die Zugfahrt nicht sicher abgrenzen (z. B. keine
+      Abfahrt gemessen), werden gar keine GPS-Punkte übertragen, nur die erkannten Halte an Bahnhöfen. Dort wird sie ausgewertet, um die Verspätungsprognose für die RB64 zu
       verbessern (z. B. wo Züge vor Signalen warten). Auf dem Server wird die Kennung nur als gekürzter Hashwert gespeichert.
-      Das ist eine Pseudonymisierung, keine Anonymisierung: Fahrten, Feedback und Gerät mit derselben Kennung gehören zusammen.</p>
+      Das ist eine Pseudonymisierung, keine Anonymisierung: Fahrten, Feedback und Gerät mit derselben Kennung gehören zusammen.
+      In Firebase steht bei einer hochgeladenen Fahrt deine anonyme Kennung, bis du sie löschst.</p>
     <p><strong>Automatisch aufzeichnen (freiwillig, standardmäßig aus):</strong> Schaltest du es ein, startet die Aufzeichnung
       von selbst, wenn du am Bahnhof bist und dein angehefteter Zug in den nächsten 20 Minuten abfährt. Steigst du nicht ein
       (du verlässt den Bahnhof oder der Zug ist weg), wird die Aufzeichnung verworfen – dann wird nichts gespeichert oder übertragen.</p>
@@ -89,7 +92,8 @@
       15 Minuten ohne neue Position. Zusätzlich wird bei deiner Kennung vermerkt, dass du teilst.</p>
     <p>Damit wir die Plausibilitätsprüfung kontrollieren können, speichert unser Server die gemeldeten Positionen
       (Zug, Position, Zeit) <strong>höchstens 2 Tage</strong> – nicht mit deiner Kennung, sondern mit einer Kennung, die
-      jeden Tag wechselt. So lassen sich Meldungen nicht über Tage hinweg oder mit deinen Fahrten und deinem Feedback verknüpfen.
+      jeden Tag wechselt. Über diese Kennung lassen sich Meldungen nicht über Tage hinweg verknüpfen; wer Zeit und Zug
+      mit einer hochgeladenen Fahrt vergleicht, könnte sie aber einer Fahrt zuordnen.
       Den Vermerk „teilt“ löschen wir 30 Tage nach deiner letzten geprüften Position.</p>
     <p>Unser Server leitet die Zugpositionen – ohne Kennung – nur an Geräte weiter, die selbst teilen. Daraus ist nicht
       erkennbar, wer mitfährt. Ausschalten kannst du das jederzeit in den Einstellungen.</p>
@@ -128,7 +132,8 @@
       <li><strong>Live-Position:</strong> in Firebase bis zum Ende der Fahrt, spätestens 15 Minuten nach der letzten Position;
         auf unserem Server ohne deine Kennung höchstens 2 Tage (siehe 2a).</li>
       <li><strong>Kennung und Push-Token:</strong> solange die App installiert ist. Nach dem Deinstallieren wird das Token ungültig;
-        Geräte, die sich 120 Tage nicht gemeldet haben, löschen wir.</li>
+        Geräte, deren Push-Token ungültig geworden ist (z. B. App deinstalliert) und die sich 120 Tage nicht gemeldet haben,
+        löschen wir.</li>
       <li><strong>Sicherungen unseres Servers:</strong> Die Datenbank wird verschlüsselt gesichert; ältere Sicherungen werden nach
         spätestens 5 Wochen gelöscht. Bis dahin können dort auch schon gelöschte Fahrten noch enthalten sein.</li>
     </ul>
