@@ -165,12 +165,19 @@ fun SummaryScreen(s: RideState, onBack: () -> Unit) {
     val dur = s.rideMinutes()?.toLong() ?: (((s.ended ?: s.started) - s.started) / 60_000)
     var askDelete by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     // noch nicht bestaetigt hochgeladen?
-    val uploadPending = de.rb64.live.Repo.prefs(ctx).getString("ride_upload_pending", null) == s.info.id
+    val uploadPending = Cloud.uploadPending(ctx, s.info.id)
 
     if (askDelete) DeleteRideDialog(
         uploaded = !uploadPending,
         onLocal = { askDelete = false; RideStore.delete(ctx, s.info.id); onBack() },
-        onEverywhere = { askDelete = false; Cloud.deleteRide(s.info.id); RideStore.delete(ctx, s.info.id); onBack() },
+        onEverywhere = {
+            askDelete = false
+            val app = ctx.applicationContext
+            Cloud.deleteRide(app, s.info.id) { ok ->
+                if (!ok) android.widget.Toast.makeText(app, "Auf dem Server noch nicht gelöscht – die App versucht es beim nächsten Start erneut.", android.widget.Toast.LENGTH_LONG).show()
+            }
+            RideStore.delete(ctx, s.info.id); onBack()
+        },
         onDismiss = { askDelete = false },
     )
 
@@ -244,8 +251,16 @@ fun SummaryScreen(s: RideState, onBack: () -> Unit) {
             if (feedback) de.rb64.live.FeedbackDialog(
                 context = "Fahrt ${s.info.train} ${s.info.from} → ${s.info.to} am ${SimpleDateFormat("dd.MM.", Locale.GERMANY).format(Date(s.started))} (${s.info.id.take(8)})",
             ) { feedback = false }
-            RbButton("Fahrt löschen …", { askDelete = true }, Modifier.fillMaxWidth(),
-                icon = RbIcons.delete, primary = false)
+            Spacer(Modifier.height(Dim.s16))
+            // zerstoerende Aktion: rot umrandet und mit Abstand, damit sie nicht wie "Feedback" aussieht
+            Row(Modifier.fillMaxWidth().heightIn(min = Dim.touch).clip(RoundedCornerShape(Dim.rButton))
+                .border(1.dp, Rb.c.bad, RoundedCornerShape(Dim.rButton)).clickable { askDelete = true }
+                .padding(horizontal = Dim.s16), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center) {
+                Icon(RbIcons.delete, null, tint = Rb.c.bad, modifier = Modifier.size(Dim.iconSmall))
+                Spacer(Modifier.width(Dim.s8))
+                Text("Fahrt löschen …", style = Ts.textStrong, color = Rb.c.bad)
+            }
         }
     }
 }
@@ -259,6 +274,8 @@ private val DAY = SimpleDateFormat("EE dd.MM.", Locale.GERMANY)
 fun RideListScreen(rides: List<RideMeta>, onOpen: (String) -> Unit, onGoDepartures: () -> Unit, onOpenBook: () -> Unit = {},
                    onOpenReview: (MonthReviews.Pending) -> Unit = {}) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    var reviewSeenTick by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var allChecks by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         TopBar("Fahrten")
         androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f),
@@ -268,14 +285,30 @@ fun RideListScreen(rides: List<RideMeta>, onOpen: (String) -> Unit, onGoDepartur
             item { RidePermissionsCard() }
             // Monatsrueckblick fuer den Vormonat (ab dem 1., den ganzen Monat ueber)
             val review = MonthReviews.pending(rides)
-            if (review != null) item {
+            val seenKey = review?.let { "review_opened_${it.from}" }
+            val seen = reviewSeenTick >= 0 && seenKey != null && de.rb64.live.Repo.prefs(ctx).getBoolean(seenKey, false)
+            fun openReview(r: MonthReviews.Pending) {
+                seenKey?.let { de.rb64.live.Repo.prefs(ctx).edit().putBoolean(it, true).apply() }
+                reviewSeenTick++
+                onOpenReview(r)
+            }
+            if (review != null && seen) item {
+                // schon angesehen: nur noch eine schmale Zeile, damit die Fahrten oben bleiben
+                RbCard(onClick = { openReview(review) }, padding = Dim.s12) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Rückblick ${review.name} ansehen", style = Ts.textStrong, modifier = Modifier.weight(1f).padding(start = Dim.s4))
+                        Icon(RbIcons.arrowRight, null, tint = Rb.c.muted, modifier = Modifier.size(Dim.iconSmall))
+                    }
+                }
+            }
+            if (review != null && !seen) item {
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(Dim.rCard))
                     .background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(
-                        androidx.compose.ui.graphics.Color(0xFFF97316), androidx.compose.ui.graphics.Color(0xFFDB2777), androidx.compose.ui.graphics.Color(0xFF6D28D9))))
-                    .clickable { onOpenReview(review) }.padding(Dim.s16)) {
+                        androidx.compose.ui.graphics.Color(0xFFC2410C), androidx.compose.ui.graphics.Color(0xFFBE185D), androidx.compose.ui.graphics.Color(0xFF6D28D9))))
+                    .clickable { openReview(review) }.padding(Dim.s16)) {
                     Text("Dein ${review.name} ist da", style = Ts.title, color = androidx.compose.ui.graphics.Color.White)
                     Text("${review.rides.size} Fahrten im Rückblick – antippen zum Ansehen", style = Ts.small,
-                        color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.9f))
+                        color = androidx.compose.ui.graphics.Color.White)
                 }
             }
             if (rides.isEmpty()) item {
@@ -294,7 +327,7 @@ fun RideListScreen(rides: List<RideMeta>, onOpen: (String) -> Unit, onGoDepartur
                 RbCard {
                     Row(horizontalArrangement = Arrangement.spacedBy(Dim.s16)) {
                         Stat("${rides.size}", "Fahrten")
-                        Stat("%.0f km".format(rides.sumOf { it.km }), "gefahren")
+                        Stat("%.0f\u00A0km".format(Locale.GERMANY, rides.sumOf { it.km }), "gefahren")
                         if (d.isNotEmpty()) Stat(d.sorted()[d.size / 2].let { m -> when { m > 0 -> "+$m"; m < 0 -> "−${-m}"; else -> "±0" } }, "meist am Ziel")
                         if (d.isNotEmpty()) Stat("${d.count { it < 3 } * 100 / d.size} %", "pünktlich")
                     }
@@ -316,8 +349,14 @@ fun RideListScreen(rides: List<RideMeta>, onOpen: (String) -> Unit, onGoDepartur
             // Prognose-Check: wie lagen Prognose und DB bei deinen angehefteten Zuegen?
             val checks = de.rb64.live.PCheckStore.done(ctx)
             if (checks.isNotEmpty()) {
+                // nur der neueste offen, damit die Fahrten nicht nach unten rutschen
                 item { SectionHeader("Prognose-Check") }
-                items(checks.size) { k -> de.rb64.live.PCheckCard(checks[k], compact = true) }
+                val shown = if (allChecks) checks.size else 1
+                items(shown) { k -> de.rb64.live.PCheckCard(checks[k], compact = true) }
+                if (checks.size > 1) item {
+                    de.rb64.live.ui.TextAction(if (allChecks) "Weniger anzeigen" else "${checks.size - 1} weitere anzeigen", null,
+                        { allChecks = !allChecks })
+                }
             }
             if (rides.isNotEmpty()) item { SectionHeader("Aufgezeichnet") }
             items(rides.size) { k ->
@@ -327,9 +366,10 @@ fun RideListScreen(rides: List<RideMeta>, onOpen: (String) -> Unit, onGoDepartur
                         Column(Modifier.weight(1f).padding(start = Dim.s4)) {
                             Text("${m.from} → ${m.to}", style = Ts.textStrong)
                             Text("${DAY.format(Date(m.started))} · ${HM.format(Date(m.started))} · ${m.train} · " +
-                                "${m.minutes} min" + (if (m.km >= 0.5) " · %.1f km".format(m.km) else ""),
+                                "${m.minutes}\u00A0min" + (if (m.km >= 0.5) " · %.1f\u00A0km".format(Locale.GERMANY, m.km) else ""),
                                 style = Ts.small, color = Rb.c.muted)
                         }
+                        Spacer(Modifier.width(Dim.s8))
                         val d = m.arrDelta
                         when {
                             d == null -> {}

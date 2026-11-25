@@ -5,6 +5,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -178,6 +179,17 @@ fun StampBookScreen(rides: List<RideMeta>, onBack: () -> Unit) {
 
     Column(Modifier.fillMaxSize()) {
         TopBar("Stempelheft", onBack = onBack)
+        // Reiter: Heft (Stempel) oder Karten (alle gesammelten Fahrkarten)
+        var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+        Row(Modifier.fillMaxWidth().padding(start = Dim.s16, end = Dim.s16, top = Dim.s8), horizontalArrangement = Arrangement.spacedBy(Dim.s8)) {
+            listOf("Heft", "Karten ${rides.size}").forEachIndexed { i, label ->
+                val on = i == tab
+                Text(label, style = Ts.smallStrong, color = if (on) Rb.c.onPrimary else Rb.c.primary,
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(if (on) Rb.c.primary else Rb.c.primaryTint)
+                        .clickable { tab = i }.padding(horizontal = 14.dp, vertical = 8.dp))
+            }
+        }
+        if (tab == 1) { CardAlbum(rides, Modifier.weight(1f)); return@Column }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Dim.s16), verticalArrangement = Arrangement.spacedBy(Dim.s12)) {
             if (backCover) {
                 // Rueckseite des Hefts - nur wer "Heft 1" lange drueckt, findet sie

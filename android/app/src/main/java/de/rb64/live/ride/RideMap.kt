@@ -123,9 +123,9 @@ private fun speedColor(c: Rb64Colors, kmh: Float): Color = when {
 fun RideMapCard(s: RideState) {
     val ctx = LocalContext.current
     LineGeo.load(ctx)
-    val tr = remember(s.points.size) { Track(s) }
+    val tr = remember(s.info.id, s.points.size) { Track(s) }
     if (tr.pts.size < 2) return
-    var sel by remember { mutableStateOf<Int?>(null) }
+    var sel by remember(s.info.id) { mutableStateOf<Int?>(null) }
     val c = Rb.c
     val tm = rememberTextMeasurer()
 
@@ -243,7 +243,7 @@ private fun DrawScope.drawRideMap(tr: Track, s: RideState, c: Rb64Colors, tm: Te
         val lay = tm.measure(st.name, TextStyle(fontSize = 11.sp, fontWeight = if (end) FontWeight.Bold else FontWeight.Medium))
         val right = k % 2 == 0
         var x = if (right) o.x + 10.dp.toPx() else o.x - 10.dp.toPx() - lay.size.width
-        x = x.coerceIn(2f, size.width - lay.size.width - 2f)
+        x = x.coerceIn(2f, maxOf(2f, size.width - lay.size.width - 2f))     // schmale Ansicht: Grenzen nie vertauscht
         val tl = Offset(x, o.y - lay.size.height / 2f)
         drawRoundRect(c.surface.copy(alpha = 0.85f), tl - Offset(3f, 1f), Size(lay.size.width + 6f, lay.size.height + 2f),
             androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()))
@@ -302,7 +302,7 @@ private fun DrawScope.drawProfile(tr: Track, s: RideState, c: Rb64Colors, tm: Te
         drawLine(c.graphic.copy(alpha = 0.5f), Offset(x, top), Offset(x, bottom), 1.dp.toPx(),
             pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx())))
         val lay = tm.measure(st.name, TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium))
-        val lx = (x - lay.size.width / 2f).coerceIn(left - 6.dp.toPx(), size.width - lay.size.width)
+        val lx = (x - lay.size.width / 2f).coerceIn(left - 6.dp.toPx(), maxOf(left - 6.dp.toPx(), size.width - lay.size.width))
         drawText(lay, color = c.muted, topLeft = Offset(lx, bottom + (if (k % 2 == 0) 2 else 15).dp.toPx()))
     }
 

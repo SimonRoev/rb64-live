@@ -32,6 +32,16 @@
             </intent-filter>
         </activity>
 
+        <!-- Nachrichten aus der Firebase-Konsole: im Kanal "Hinweise" mit Zug-Symbol statt im Standardkanal -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="rb64_info" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notify" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/widget_primary" />
         <!-- Empfaengt die Widget-Daten von der VM (Firebase Cloud Messaging) -->
         <service
             android:name=".PushService"
@@ -65,6 +75,10 @@
             android:name=".MuteReceiver"
             android:exported="false" />
 
+        <!-- Knoepfe im Widget: nicht exportiert, nur ueber die eigenen PendingIntents erreichbar -->
+        <receiver
+            android:name=".widget.WidgetActions"
+            android:exported="false" />
         <receiver
             android:name=".widget.Rb64WidgetProvider"
             android:exported="true"

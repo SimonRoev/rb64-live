@@ -81,7 +81,7 @@ object HistStore {
         cache?.let { return it }
         val f = file(ctx)
         if (!f.exists()) return null
-        return runCatching { JSONObject(f.readText()) }.getOrNull()?.also { cache = it }
+        return runCatching { JSONObject(String(android.util.AtomicFile(f).readFully())) }.getOrNull()?.also { cache = it }
     }
 
     fun refreshIfDue(ctx: Context, force: Boolean = false) {
@@ -93,12 +93,19 @@ object HistStore {
             FirebaseFirestore.getInstance().collection("public").document("hist").get()
                 .addOnSuccessListener { d ->
                     val json = d.getString("json") ?: return@addOnSuccessListener
-                    runCatching { JSONObject(json) }.onSuccess {
-                        file(app).writeText(json)
-                        cache = it
-                        Repo.prefs(app).edit().putLong("hist_fetched", System.currentTimeMillis()).apply()
-                        version++
-                    }
+                    val parsed = runCatching { JSONObject(json) }.getOrNull() ?: return@addOnSuccessListener
+                    cache = parsed
+                    version++
+                    // Datei im Hintergrund und ueber eine Zwischendatei schreiben; ein Fehler (z. B. Speicher voll)
+                    // laesst den bisherigen Stand stehen statt die App abstuerzen zu lassen
+                    Thread {
+                        runCatching {
+                            val f = android.util.AtomicFile(file(app))
+                            val out = f.startWrite()
+                            try { out.write(json.toByteArray()); f.finishWrite(out) } catch (e: Exception) { f.failWrite(out); throw e }
+                            Repo.prefs(app).edit().putLong("hist_fetched", System.currentTimeMillis()).apply()
+                        }.onFailure { Log.w(TAG, "Verlauf nicht gespeichert", it) }
+                    }.start()
                 }
                 .addOnFailureListener { Log.w(TAG, "Verlauf laden fehlgeschlagen", it) }
         }
@@ -145,7 +152,8 @@ private fun plus(v: Int) = if (v >= 1) "+$v" else "±0"
 /** Kurzfassung, z. B. "meist +10 · Spanne +6 bis +26 · 1× ausgefallen". */
 fun HistSeries.summary(long: Boolean): String {
     val k = known
-    val parts = mutableListOf(if (median >= 1) "meist +$median min" else "meist pünktlich")
+    // nur Ausfaelle, keine gefahrene Fahrt: nicht "meist puenktlich" behaupten
+    val parts = mutableListOf(if (k.isEmpty()) "zuletzt nicht gefahren" else if (median >= 1) "meist +$median min" else "meist pünktlich")
     if (long && k.size >= 2 && k.max() > k.min()) parts += "zwischen ${plus(k.min())} und ${plus(k.max())} min"
     if (cancelled > 0) parts += "${cancelled}× ausgefallen" else if (long) parts += "nie ausgefallen"
     return parts.joinToString(" · ")
@@ -154,7 +162,7 @@ fun HistSeries.summary(long: Boolean): String {
 /** Detailblatt: "Wie puenktlich war diese Abfahrt?" mit Wert ueber jedem Balken, Medianlinie und "heute". */
 @Composable
 fun HistChart(s: HistSeries, today: Int?) {
-    var open by rememberSaveable { mutableStateOf(true) }
+    var open by rememberSaveable { mutableStateOf(false) }      // eingeklappt: ein Satz reicht meist
     de.rb64.live.ui.Collapsible("Wie pünktlich war diese Abfahrt?", open, { open = !open },
         Modifier.fillMaxWidth().background(Rb.c.surface, RoundedCornerShape(Dim.rCard))
             .border(1.dp, Rb.c.line, RoundedCornerShape(Dim.rCard)).padding(horizontal = 14.dp, vertical = 4.dp)) {

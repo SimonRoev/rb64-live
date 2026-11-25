@@ -106,7 +106,8 @@ fun RbSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) 
 
 /** Fester Kopf + scrollender Inhalt fuer [RbSheet]. Beim Scrollen trennt eine Linie den Kopf ab. */
 @Composable
-fun SheetBody(header: @Composable ColumnScope.() -> Unit, body: @Composable ColumnScope.() -> Unit) {
+fun SheetBody(header: @Composable ColumnScope.() -> Unit, footer: (@Composable ColumnScope.() -> Unit)? = null,
+              body: @Composable ColumnScope.() -> Unit) {
     val scroll = androidx.compose.foundation.rememberScrollState()
     // Hochscrollen soll oben anhalten: Nur eine Geste, die schon oben beginnt, darf das Blatt nach unten ziehen.
     // Rest-Scrollen und Schwung aus einer Geste von weiter unten schluckt diese Verbindung.
@@ -133,9 +134,16 @@ fun SheetBody(header: @Composable ColumnScope.() -> Unit, body: @Composable Colu
                     }
                 }
                 .nestedScroll(stopAtTop).verticalScroll(scroll)
-                .padding(horizontal = Dim.s16).padding(top = Dim.s12, bottom = Dim.s24).navigationBarsPadding(),
+                .padding(horizontal = Dim.s16).padding(top = Dim.s12, bottom = Dim.s24)
+                .then(if (footer == null) Modifier.navigationBarsPadding() else Modifier),
             verticalArrangement = Arrangement.spacedBy(Dim.s16), content = body,
         )
+        // feste Knoepfe unten (scrollen nicht mit, liegen nie unter der Gestenleiste)
+        if (footer != null) {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Rb.c.line))
+            Column(Modifier.fillMaxWidth().padding(horizontal = Dim.s16).padding(top = Dim.s8, bottom = Dim.s8)
+                .navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(Dim.s4), content = footer)
+        }
     }
 }
 
@@ -253,7 +261,7 @@ fun HeaderChip(text: String, selected: Boolean, first: Boolean = true, last: Boo
             color = if (selected) Rb.c.header else Rb.c.onHeader,
             modifier = Modifier.clip(RoundedCornerShape(topStart = l, bottomStart = l, topEnd = r, bottomEnd = r))
                 .background(if (selected) Rb.c.onHeader else Rb.c.onHeader.copy(alpha = 0.16f))
-                .padding(horizontal = Dim.s12, vertical = 7.dp))
+                .padding(horizontal = Dim.s12, vertical = 9.dp))     // sichtbar ca. 36 dp, Antippflaeche 48 dp
     }
 }
 
@@ -328,8 +336,9 @@ fun BottomNav(items: List<Pair<String, ImageVector>>, selected: Int, center: Int
                             .background(Rb.c.primary),
                         contentAlignment = Alignment.Center,
                     ) { Icon(icon, null, tint = Rb.c.onPrimary, modifier = Modifier.size(28.dp)) }
-                    Text(label, style = Ts.smallStrong, color = if (on) Rb.c.primary else Rb.c.onSurface,
-                        textAlign = TextAlign.Center, maxLines = 1, modifier = Modifier.offset(y = (-10).dp))
+                    // Beschriftung wie bei den anderen Reitern: nur der aktive ist fett und farbig, gleiche Hoehe
+                    Text(label, style = if (on) Ts.smallStrong else Ts.small, color = if (on) Rb.c.primary else Rb.c.muted,
+                        textAlign = TextAlign.Center, maxLines = 1, modifier = Modifier.offset(y = (-5).dp))
                 }
                 return@forEachIndexed
             }
@@ -385,5 +394,26 @@ fun relTime(epoch: Long, now: Long = System.currentTimeMillis()): String {
         m < 2 -> "jetzt"
         m < 60 -> "in $m min"
         else -> "in ${m / 60} h %02d".format(m % 60)
+    }
+}
+
+/**
+ * Vollbild-Dialog (Rueckblick, grosse Kartenansicht) bis unter die Statusleiste zeichnen - sonst bleibt oben ein
+ * dunkler Streifen (abgedunkelter Hintergrund). Inhalte halten mit statusBarsPadding() selbst Abstand.
+ */
+@Composable
+fun DialogEdgeToEdge(lightIcons: Boolean = true) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.SideEffect {
+        val w = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window ?: return@SideEffect
+        w.setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(w, false)
+        w.attributes = w.attributes.apply {
+            layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        }
+        w.setDimAmount(0f)
+        // Dialogfenster beginnen sonst unter der Statusleiste - so reicht der Hintergrund bis ganz oben
+        w.addFlags(android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        androidx.core.view.WindowCompat.getInsetsController(w, view).isAppearanceLightStatusBars = !lightIcons
     }
 }

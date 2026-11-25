@@ -214,7 +214,7 @@ private fun ColumnScope.PageWidgets() {
     Head(RbIcons.departures, "Widgets", "Damit du die App kaum öffnen musst.")
     Bullet(RbIcons.departures, "Groß oder klein", "Groß (3×3) mit den nächsten Zügen oder klein (2×1) nur mit dem nächsten. Lange auf den Startbildschirm drücken → Widgets → RB64 Live.")
     Bullet(RbIcons.arrowRight, "Direkt zum Zug", "Tippen auf einen Zug im Widget öffnet ihn mit allen Halten.")
-    Bullet(RbIcons.settings, "Alles einstellbar", "Strecken, Zeitfenster, Farbschema und Effekte findest du über das Zahnrad oben rechts. Diese Einführung auch, ganz unten.")
+    Bullet(RbIcons.settings, "Alles einstellbar", "Strecken, Zeitfenster, Farbschema und Effekte findest du über den Regler oben rechts (das Symbol mit den drei Schiebern). Diese Einführung auch, ganz unten.")
 }
 
 /* ------------------------------------------------------------------ Datenschutz */
@@ -227,7 +227,7 @@ private fun ColumnScope.PagePrivacy() {
     Bullet(RbIcons.route, "Strecken und Einstellungen bleiben auf dem Handy",
         "Welche Strecken du fährst und wann du Meldungen willst, wird nicht übertragen. Die Meldungen entstehen auf deinem Handy.")
     Bullet(RbIcons.rides, "Fahrten nur, wenn du mitfährst",
-        "Erst nach „Ich fahre mit“ zeichnet die App per GPS auf – nur Punkte entlang der Bahnstrecke, dazu Halte und deine Markierungen. " +
+        "Erst nach „Ich fahre mit“ – oder, wenn du es einschaltest, automatisch für deinen angehefteten Zug – zeichnet die App per GPS auf – nur Punkte entlang der Bahnstrecke, dazu Halte und deine Markierungen. " +
             "Die Fahrt geht anonym an unseren Server, damit die Prognose besser wird. Beim Löschen wählst du: nur auf dem Handy oder überall.")
     Bullet(RbIcons.live, "Live-Position nur, wenn du sie teilst",
         "Freiwillig und standardmäßig aus: Während du mitfährst, sendet die App alle 30 s nur, wo auf der Strecke dein Zug ist " +
@@ -275,7 +275,7 @@ private fun ColumnScope.PageFeatures() {
         fOn = fenceOn(ctx); fDenied = !fOn
     }
     val askBackground = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { enableFence() }
-    val askFine = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+    val askFine = rememberLauncherForActivityResult(de.rb64.live.ui.FineLocation()) { ok ->
         if (ok) askBackground.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) else fDenied = true
     }
 

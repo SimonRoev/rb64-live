@@ -3,6 +3,7 @@ package de.rb64.live.ride
 import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -183,16 +184,36 @@ object RideStore {
     private fun rideFile(ctx: Context, id: String) = File(dir(ctx), "$id.json")
     private fun indexFile(ctx: Context) = File(dir(ctx), "index.json")
 
+    /** Fahrt-IDs sind UUIDs; alles andere (z. B. "../x" aus einer manipulierten Sicherung) wird abgelehnt. */
+    private val ID_OK = Regex("^[A-Za-z0-9-]{8,64}$")
+    fun validId(id: String) = ID_OK.matches(id)
+
+    /** Schreiben ueber eine Zwischendatei: bricht der Prozess mitten im Schreiben ab, bleibt die alte Datei heil. */
+    private fun writeSafe(f: File, text: String) {
+        val a = android.util.AtomicFile(f)
+        val out = a.startWrite()
+        try { out.write(text.toByteArray()); a.finishWrite(out) } catch (e: Exception) { a.failWrite(out); throw e }
+    }
+    private fun readSafe(f: File): String = String(android.util.AtomicFile(f).readFully())
+
     fun init(ctx: Context) {
-        if (_state.value == null) _state.value = runCatching { fromJson(JSONObject(file(ctx).readText())) }.getOrNull()
+        if (_state.value == null) _state.value = runCatching { fromJson(JSONObject(readSafe(file(ctx)))) }.getOrNull()
         if (loaded) return
         loaded = true
-        var list = runCatching { JSONArray(indexFile(ctx).readText()).let { a -> List(a.length()) { metaFrom(a.getJSONObject(it)) } } }
+        var list = runCatching { JSONArray(readSafe(indexFile(ctx))).let { a -> List(a.length()) { metaFrom(a.getJSONObject(it)) } } }
             .getOrDefault(emptyList())
+        // Fahrtdateien, die im Index fehlen (Index beschaedigt oder alte Schreibluecke), wieder aufnehmen -
+        // nie Fahrten verlieren, nur weil der Index nicht lesbar war
+        val known = list.map { it.id }.toSet()
+        val missing = dir(ctx).listFiles()?.filter { it.name.endsWith(".json") && it.name != "index.json" &&
+            it.name.removeSuffix(".json") !in known }.orEmpty()
+        if (missing.isNotEmpty()) list = list + missing.mapNotNull { f ->
+            runCatching { meta(fromJson(JSONObject(readSafe(f)))) }.getOrNull()?.takeIf { validId(it.id) }
+        }
         // Umzug: bisher gab es nur die letzte Fahrt
         runCatching { fromJson(JSONObject(lastFile(ctx).readText())) }.getOrNull()?.let { old ->
             if (list.none { it.id == old.info.id }) {
-                rideFile(ctx, old.info.id).writeText(toJson(old).toString())
+                if (validId(old.info.id)) writeSafe(rideFile(ctx, old.info.id), toJson(old).toString())
                 list = listOf(meta(old)) + list
             }
             lastFile(ctx).delete()
@@ -203,19 +224,19 @@ object RideStore {
         // einmalig: Fahrzeit (Abfahrt -> Ankunft) fuer aeltere Eintraege nachtragen, im Hintergrund
         if (list.any { it.rideMin == null }) Thread {
             val fixed = list.associate { m -> m.id to (m.rideMin ?: load(ctx, m.id)?.rideMinutes()) }
-            _history.value = _history.value.map { m -> if (m.rideMin == null) m.copy(rideMin = fixed[m.id]) else m }
+            _history.update { h -> h.map { m -> if (m.rideMin == null) m.copy(rideMin = fixed[m.id]) else m } }
             saveIndex(ctx)
         }.start()
     }
 
     /** Ganze Fahrt mit Messpunkten laden. */
     fun load(ctx: Context, id: String): RideState? =
-        runCatching { fromJson(JSONObject(rideFile(ctx, id).readText())) }.getOrNull()
+        if (!validId(id)) null else runCatching { fromJson(JSONObject(readSafe(rideFile(ctx, id)))) }.getOrNull()
 
     /** Gespeicherte Fahrt loeschen (lokal; die Cloud-Kopie markiert der Aufrufer). */
     fun delete(ctx: Context, id: String) {
-        rideFile(ctx, id).delete()
-        _history.value = _history.value.filter { it.id != id }
+        if (validId(id)) android.util.AtomicFile(rideFile(ctx, id)).delete()
+        _history.update { h -> h.filter { it.id != id } }
         saveIndex(ctx)
         if (_last.value?.info?.id == id) _last.value = _history.value.firstOrNull()?.let { load(ctx, it.id) }
     }
@@ -223,16 +244,27 @@ object RideStore {
     /** Fahrt aus einer Sicherung uebernehmen (false = war schon da oder unvollstaendig). */
     fun importRide(ctx: Context, s: RideState): Boolean {
         init(ctx)
-        if (s.ended == null || _history.value.any { it.id == s.info.id }) return false
-        rideFile(ctx, s.info.id).writeText(toJson(s).toString())
-        _history.value = (_history.value + meta(s)).sortedByDescending { it.started }.take(MAX_RIDES)
+        if (s.ended == null || !validId(s.info.id) || _history.value.any { it.id == s.info.id }) return false
+        writeSafe(rideFile(ctx, s.info.id), toJson(s).toString())
+        val before = _history.value.map { it.id }.toSet()
+        _history.update { h -> (h + meta(s)).sortedByDescending { it.started }.take(MAX_RIDES) }
+        dropBeyondLimit(ctx, before + s.info.id)
         saveIndex(ctx)
         _last.value = _history.value.firstOrNull()?.let { load(ctx, it.id) }
         return true
     }
 
+    private val indexLock = Any()
     private fun saveIndex(ctx: Context) = runCatching {
-        indexFile(ctx).writeText(JSONArray().apply { _history.value.forEach { put(metaJson(it)) } }.toString())
+        synchronized(indexLock) {
+            writeSafe(indexFile(ctx), JSONArray().apply { _history.value.forEach { put(metaJson(it)) } }.toString())
+        }
+    }
+
+    /** Nur Fahrten loeschen, die gerade ueber das Limit gefallen sind - nie "alles, was nicht im Index steht". */
+    private fun dropBeyondLimit(ctx: Context, before: Set<String>) {
+        val now = _history.value.map { it.id }.toSet()
+        (before - now).filter { validId(it) }.forEach { android.util.AtomicFile(rideFile(ctx, it)).delete() }
     }
 
     fun meta(s: RideState): RideMeta {
@@ -267,11 +299,11 @@ object RideStore {
         save(ctx, s)
     }
 
-    fun update(ctx: Context, f: (RideState) -> RideState) {
+    fun update(ctx: Context, persist: Boolean = true, f: (RideState) -> RideState) {
         val s = _state.value ?: return
         val n = f(s)
         _state.value = n
-        save(ctx, n)
+        if (persist) save(ctx, n)
     }
 
     fun finish(ctx: Context): RideState? {
@@ -279,25 +311,24 @@ object RideStore {
         val wx = (s.info.weather + runCatching { weatherNow(ctx) }.getOrDefault(emptyList())).distinct()
         val done = s.copy(info = s.info.copy(weather = wx), ended = System.currentTimeMillis(),
             events = Analyzer.withArrival(Analyzer.events(s.points), s.points, s.info.to))
-        rideFile(ctx, done.info.id).writeText(toJson(done).toString())
-        _history.value = (listOf(meta(done)) + _history.value.filter { it.id != done.info.id }).take(MAX_RIDES)
+        writeSafe(rideFile(ctx, done.info.id), toJson(done).toString())
+        val before = _history.value.map { it.id }.toSet()
+        _history.update { h -> (listOf(meta(done)) + h.filter { it.id != done.info.id }).take(MAX_RIDES) }
         saveIndex(ctx)
-        // aelteste Dateien ueber dem Limit entfernen
-        val keep = _history.value.map { "${it.id}.json" }.toSet() + "index.json"
-        dir(ctx).listFiles()?.filter { it.name !in keep }?.forEach { it.delete() }
+        dropBeyondLimit(ctx, before)          // aelteste Fahrten ueber dem Limit entfernen
         _last.value = done
         _state.value = null
-        file(ctx).delete()
-        ctx.getSharedPreferences("rb64", Context.MODE_PRIVATE).edit().putLong("ride_ended", done.ended!!)
-            .putString("ride_upload_pending", done.info.id).apply()     // bis der Upload bestaetigt ist
+        android.util.AtomicFile(file(ctx)).delete()
+        ctx.getSharedPreferences("rb64", Context.MODE_PRIVATE).edit().putLong("ride_ended", done.ended!!).apply()
+        de.rb64.live.Cloud.queueUpload(ctx, done.info.id)                // bis der Upload bestaetigt ist
         return done
     }
 
     /** Laufende Aufzeichnung verwerfen (nie losgefahren). */
-    fun discard(ctx: Context) { _state.value = null; file(ctx).delete() }
+    fun discard(ctx: Context) { _state.value = null; android.util.AtomicFile(file(ctx)).delete() }
 
 
-    private fun save(ctx: Context, s: RideState) = runCatching { file(ctx).writeText(toJson(s).toString()) }
+    private fun save(ctx: Context, s: RideState) = runCatching { writeSafe(file(ctx), toJson(s).toString()) }
 
     // ---------------------------------------------------------------- JSON
     fun toJson(s: RideState): JSONObject = JSONObject().apply {

@@ -81,7 +81,7 @@ object Notifier {
     fun createChannels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CH_INFO, "Hinweise", NotificationManager.IMPORTANCE_DEFAULT).apply {
-            description = "Nachrichten zur App, z. B. neues Feedback (nur für den Entwickler)"
+            description = "Wichtige Hinweise zur App, z. B. Störungen oder Wartung"
         })
         nm.createNotificationChannel(NotificationChannel(CH_PIN, "Dein Zug (Sperrbildschirm)", NotificationManager.IMPORTANCE_DEFAULT).apply {
             setSound(null, null); enableVibration(false); setShowBadge(false)
@@ -184,6 +184,7 @@ object Notifier {
             if (!r.cancelled && r.depDelay >= 1 && !departed) "Plan ${r.depPlanned}" else null,
             r.platform?.let { "Gleis $it" },
             if (!r.cancelled && !departed) "an ${r.arrExpected}" else null,
+            if (!r.cancelled && !departed) r.whereText() else null,
             r.reason?.takeIf { !r.cancelled }?.replaceFirstChar { it.uppercase() },
         ).joinToString(" · ").let { if (here && !departed && !r.cancelled) "Du bist am Bahnhof · $it" else it }
         val open = PendingIntent.getActivity(ctx, 9, Intent(ctx, MainActivity::class.java)
@@ -212,27 +213,35 @@ object Notifier {
                 Notification.Action.Builder(null, "▶ Los, ich fahre mit", pi).setAuthenticationRequired(false).build()
             } else {
                 val checkin = PendingIntent.getActivity(ctx, 10, Intent(ctx, MainActivity::class.java)
-                    .putExtra("checkin", true).putExtra("train", r.train)
+                    .putExtra("checkin", true).putExtra("train", r.train).putExtra("nonce", Repo.checkinNonce(ctx))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
                 Notification.Action.Builder(null, "Ich fahre mit", checkin).build()
             }
             n.addAction(action)
         }
-        // Android 16+: als Live Update oben (Statusleisten-Chip, Sperrbildschirm), wie bei der Fahrt
+        // Android 16+: als Live Update oben (Statusleisten-Chip, Sperrbildschirm), gleiches Aussehen wie die Fahrt (LiveCard)
         if (android.os.Build.VERSION.SDK_INT >= 36 && Repo.pinLock(ctx) && !r.cancelled) {
-            val total = 1000
-            val primary = ctx.getColor(R.color.widget_primary)
-            val pts = r.stops.size.coerceAtLeast(2)
-            val prog = if (departed && r.marker >= 0) (r.marker.coerceIn(0.0, 1.0) * total).toInt() else 0
-            n.setStyle(Notification.ProgressStyle()
-                .setStyledByProgress(true)
-                .setProgressSegments(listOf(Notification.ProgressStyle.Segment(total).setColor(primary)))
-                .setProgressPoints((0 until pts).map { i -> Notification.ProgressStyle.Point(i * total / (pts - 1)).setColor(primary) })
-                .setProgress(prog)
-                .setProgressTrackerIcon(android.graphics.drawable.Icon.createWithResource(ctx, R.drawable.ic_notify)))
-            n.setRequestPromotedOngoing(true)
-            n.setShortCriticalText(if (departed) "an ${r.arrExpected}" else "ab ${r.depExpected}")
+            val L = LiveCard
+            val names = r.stops.map { it.name }.ifEmpty { listOf(rel.from, rel.to) }
+            val trip = snap.trips.firstOrNull { it.train == r.train }
+            val toHigher = names.size >= 2 && L.seqOf(names.last()) > L.seqOf(names.first())
+            if (!departed) {
+                // der Zug faehrt auf deinen Bahnhof zu; kurz vor der Abfahrt zaehlt der Chip herunter
+                val bar = L.approach(rel.from, toHigher, trip?.pos ?: -1.0) ?: de.rb64.live.LiveCard.Bar(names, 0.0, names.lastIndex, null)
+                L.apply(ctx, n, bar, "ab ${r.depExpected}", L.countdown(r.depEpoch, now),
+                    r.platform?.let { LiveCard.Badge.Platform(it) })
+            } else {
+                val pos = trip?.pos?.takeIf { it >= 0 }
+                val cross = L.crossingIndex(trip, names, pos)
+                val prog = pos?.let { L.fraction(names, it) } ?: r.marker.takeIf { it in 0.0..1.0 } ?: 0.0
+                L.apply(ctx, n, de.rb64.live.LiveCard.Bar(names, prog, names.lastIndex, cross, delay = r.arrDelay, start = true),
+                    L.chipFor(r.arrDelay, r.arrExpected), badge = LiveCard.Badge.Delay(r.arrDelay))
+                // steht gerade am Kreuzungshalt: das ist die wichtigste Nachricht
+                val cs = cross?.let { names[it] }
+                if (cs != null && pos != null && kotlin.math.abs(pos - L.seqOf(cs)) < 0.05)
+                    n.setContentTitle("Dein Zug wartet in $cs auf Gegenzug")
+            }
         }
         nm.notify(PIN_ID, n.build())
     }

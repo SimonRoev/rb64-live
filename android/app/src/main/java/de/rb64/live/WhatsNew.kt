@@ -50,6 +50,23 @@ object WhatsNew {
     data class Release(val code: Int, val name: String, val items: List<Item>)
 
     val RELEASES: List<Release> = listOf(
+        Release(16, "0.16", listOf(
+            Item(RbIcons.rides, "Alle Karten auf einen Blick",
+                "Im Stempelheft unter „Karten“: alle deine Fahrkarten, nach Monat oder Seltenheit sortiert. Antippen zeigt sie groß, " +
+                    "hoch und runter wischen blättert."),
+            Item(RbIcons.play, "Automatisch aufzeichnen",
+                "Unter Einstellungen › Mitfahren: Bist du am Bahnhof und dein angehefteter Zug fährt bald, startet die Aufzeichnung " +
+                    "von selbst. Steigst du nicht ein, wird sie verworfen."),
+            Item(RbIcons.lock, "Sparsamer mit deinen Daten",
+                "Hochgeladen wird nur noch die eigentliche Zugfahrt, nicht der Weg zum Bahnhof. „Überall löschen“ klappt " +
+                    "auch nach einem Handywechsel, und beim Wiederherstellen einer Sicherung musst du Live-Teilen und " +
+                    "Automatik selbst wieder einschalten."),
+            Item(RbIcons.live, "Dein Zug live bis zum Ziel",
+                "Während du mitfährst, zeigt die Strecke deinen Zug jetzt bis zum Ausstieg nach deinem GPS – nur auf deinem Handy."),
+            Item(RbIcons.check, "Kleiner und schlauer",
+                "Die App ist nur noch ein Fünftel so groß. Hast du beim Mitfahren aus Versehen die falsche Richtung gewählt, " +
+                    "merkt die Aufzeichnung das jetzt und stellt auf den richtigen Zug um."),
+        )),
         Release(15, "0.15", listOf(
             Item(RbIcons.trend, "Dein Monatsrückblick",
                 "Bist du in einem Monat mindestens 8-mal mitgefahren, kommt am 1. dein Rückblick als kleine Story: Fahrten, Kilometer, " +

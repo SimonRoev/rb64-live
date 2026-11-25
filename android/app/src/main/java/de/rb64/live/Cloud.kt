@@ -45,39 +45,119 @@ object Cloud {
         }
     }
 
-    /** Aufgezeichnete Fahrt hochladen: rides/{rideId} (komplette Fahrt als JSON-Text). */
+    // ---------------------------------------------------------------- Fahrten hochladen / loeschen
+    /** Warteschlange aller noch nicht bestaetigt hochgeladenen Fahrten (nicht nur der letzten). */
+    private const val QUEUE = "ride_upload_queue"
+    private const val DEL_QUEUE = "ride_delete_queue"
+    fun queueUpload(ctx: Context, id: String) {
+        val p = Repo.prefs(ctx)
+        p.edit().putStringSet(QUEUE, (p.getStringSet(QUEUE, emptySet()).orEmpty() + id)).apply()
+    }
+    private fun unqueue(ctx: Context, id: String) {
+        val p = Repo.prefs(ctx)
+        p.edit().putStringSet(QUEUE, p.getStringSet(QUEUE, emptySet()).orEmpty() - id).remove("ride_upload_pending").apply()
+    }
+    fun uploadPending(ctx: Context, id: String): Boolean =
+        id in Repo.prefs(ctx).getStringSet(QUEUE, emptySet()).orEmpty() || Repo.prefs(ctx).getString("ride_upload_pending", null) == id
+
+    /**
+     * Loeschschluessel je Fahrt: liegt in der Fahrt-Kopie auf dem Server (nur die VM kann ihn lesen) und lokal
+     * (auch in der Sicherung). Damit klappt "Ueberall loeschen" auch nach einem Handywechsel mit neuer Kennung.
+     */
+    fun delKey(ctx: Context, id: String): String {
+        val p = Repo.prefs(ctx)
+        return p.getString("rk_$id", null) ?: java.util.UUID.randomUUID().toString().also { p.edit().putString("rk_$id", it).apply() }
+    }
+
+    /**
+     * Fuer den Upload nur die eigentliche Zugfahrt: Abfahrt am Einstieg - 1 min bis Ankunft am Ziel + 1 min.
+     * Der Weg zum Bahnhof (der Korridor ist 1,5 km breit) bleibt so auf dem Handy.
+     */
+    fun forUpload(s: de.rb64.live.ride.RideState): de.rb64.live.ride.RideState {
+        val ev = s.events
+        val dep = de.rb64.live.ride.Analyzer.departures(ev)[s.info.from] ?: ev.firstOrNull { it.station == s.info.from }?.dep
+        // Ankunft am Ziel, sonst der letzte erkannte Bahnhof unterwegs - nie das Ende der Aufzeichnung (Weg nach Hause)
+        val arr = ev.lastOrNull { it.station == s.info.to }?.arr
+            ?: ev.lastOrNull { it.station != null && it.station != s.info.from }?.let { it.dep ?: it.arr }
+        if (dep == null || arr == null || arr <= dep) {
+            // Zugfahrt nicht sicher abgrenzbar: keine GPS-Punkte hochladen, nur Halte an Bahnhoefen und Markierungen ohne Ort
+            return s.copy(points = emptyList(), tags = s.tags.map { it.copy(lat = null, lon = null) },
+                events = ev.filter { it.station != null })
+        }
+        val a = dep - 60_000L; val b = arr + 60_000L
+        return s.copy(points = s.points.filter { it.t in a..b }, tags = s.tags.filter { it.t in a..b },
+            events = ev.filter { (it.dep ?: it.arr) >= a && it.arr <= b })
+    }
+
+    /** Aufgezeichnete Fahrt hochladen: rides/{rideId} (Zugfahrt als JSON-Text, siehe [forUpload]). */
     fun uploadRide(ctx: Context, ride: de.rb64.live.ride.RideState, onDone: (() -> Unit)? = null) {
+        queueUpload(ctx, ride.info.id)
         withUser { uid ->
             val i = ride.info
+            val up = forUpload(ride)
             FirebaseFirestore.getInstance().collection("rides").document(i.id).set(mapOf(
                 "uid" to uid, "train" to i.train, "relId" to i.relId, "from" to i.from, "to" to i.to,
-                "depPlanned" to i.depPlanned, "started" to ride.started, "ended" to ride.ended,
-                "points" to ride.points.size, "deleted" to false,
-                "data" to de.rb64.live.ride.RideStore.toJson(ride).toString(),
+                "depPlanned" to i.depPlanned, "started" to up.started, "ended" to up.ended,
+                "points" to up.points.size, "deleted" to false,
+                "data" to de.rb64.live.ride.RideStore.toJson(up).toString(),
+                "delKey" to delKey(ctx, i.id),
                 "uploaded" to FieldValue.serverTimestamp(),
             )).addOnSuccessListener {
-                Log.i(TAG, "Fahrt hochgeladen (${ride.points.size} Punkte)")
-                val p = Repo.prefs(ctx)
-                if (p.getString("ride_upload_pending", null) == i.id) p.edit().remove("ride_upload_pending").apply()
+                Log.i(TAG, "Fahrt hochgeladen (${up.points.size} Punkte)")
+                unqueue(ctx, i.id)
                 onDone?.invoke()
-            }.addOnFailureListener { Log.w(TAG, "Fahrt nicht hochgeladen (wird beim nächsten Start erneut versucht)", it); onDone?.invoke() }
+            }.addOnFailureListener {
+                // abgelehnt (Regeln): Wiederholen hilft nicht - sonst beim naechsten Start erneut versuchen
+                if ((it as? com.google.firebase.firestore.FirebaseFirestoreException)?.code ==
+                    com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) unqueue(ctx, i.id)
+                Log.w(TAG, "Fahrt nicht hochgeladen", it); onDone?.invoke()
+            }
         }
     }
 
-    /** Noch nicht hochgeladene letzte Fahrt erneut senden (z. B. nach fehlender Firestore-Regel oder ohne Netz). */
+    /** Alle noch nicht hochgeladenen Fahrten erneut senden (z. B. ohne Netz oder vor der ersten Anmeldung). */
     fun retryPendingRide(ctx: Context) {
-        val id = Repo.prefs(ctx).getString("ride_upload_pending", null) ?: return
+        val p = Repo.prefs(ctx)
+        p.getStringSet(DEL_QUEUE, emptySet()).orEmpty().forEach { deleteRide(ctx, it) }
+        val ids = p.getStringSet(QUEUE, emptySet()).orEmpty() + listOfNotNull(p.getString("ride_upload_pending", null))
+        if (ids.isEmpty()) return
         de.rb64.live.ride.RideStore.init(ctx)
-        val ride = de.rb64.live.ride.RideStore.load(ctx, id)
-        if (ride != null) uploadRide(ctx, ride) else Repo.prefs(ctx).edit().remove("ride_upload_pending").apply()
+        ids.forEach { id ->
+            val ride = de.rb64.live.ride.RideStore.load(ctx, id)
+            if (ride != null) uploadRide(ctx, ride) else unqueue(ctx, id)
+        }
     }
 
-    /** Fahrt als geloescht markieren (die VM ignoriert sie dann). */
-    fun deleteRide(id: String) {
-        withUser { uid ->
-            FirebaseFirestore.getInstance().collection("rides").document(id)
-                .update(mapOf("deleted" to true, "uploaded" to FieldValue.serverTimestamp()))
-                .addOnFailureListener { Log.w(TAG, "Loeschen fehlgeschlagen", it) }
+    /**
+     * Fahrt auf dem Server loeschen (die VM entfernt dann Messpunkte und Kennung). Mit Loeschschluessel geht das
+     * auch von einem anderen Geraet aus; [onResult] meldet, ob es geklappt hat.
+     */
+    fun deleteRide(ctx: Context, id: String, onResult: (Boolean) -> Unit = {}) {
+        // Noch nicht bestaetigt hochgeladen: aus der Warteschlange nehmen UND trotzdem "geloescht" senden - ein im
+        // Firebase-SDK gepuffertes Hochladen (offline) wuerde sonst spaeter doch ankommen. Die Schreibreihenfolge ist
+        // garantiert; gibt es die Fahrt oben gar nicht, zaehlt "nicht gefunden" als erledigt.
+        if (uploadPending(ctx, id)) unqueue(ctx, id)
+        val key = Repo.prefs(ctx).getString("rk_$id", null)
+        withUser { _ ->
+            val upd = mutableMapOf<String, Any>("deleted" to true, "uploaded" to FieldValue.serverTimestamp())
+            if (key != null) upd["delProof"] = key
+            FirebaseFirestore.getInstance().collection("rides").document(id).update(upd)
+                .addOnSuccessListener {
+                    val p = Repo.prefs(ctx)
+                    p.edit().remove("rk_$id").putStringSet(DEL_QUEUE, p.getStringSet(DEL_QUEUE, emptySet()).orEmpty() - id).apply()
+                    onResult(true)
+                }
+                .addOnFailureListener {
+                    // z. B. ohne Netz: merken und beim naechsten Start erneut versuchen
+                    val p = Repo.prefs(ctx)
+                    val code = (it as? com.google.firebase.firestore.FirebaseFirestoreException)?.code
+                    val missing = code == com.google.firebase.firestore.FirebaseFirestoreException.Code.NOT_FOUND
+                    // abgelehnt (alte Fahrt ohne Schluessel von einem anderen Geraet) oder nie oben: Wiederholen hilft nicht
+                    val final = missing || code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED
+                    if (!missing) Log.w(TAG, "Loeschen fehlgeschlagen", it)
+                    p.edit().putStringSet(DEL_QUEUE, p.getStringSet(DEL_QUEUE, emptySet()).orEmpty().let { q -> if (final) q - id else q + id }).apply()
+                    onResult(missing)
+                }
         }
     }
 

@@ -28,6 +28,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -131,7 +133,14 @@ fun LiveMapCard(map: LiveMap, lo: Int, hi: Int, crossings: List<Crossing>, myTra
     val tm = rememberTextMeasurer()
 
     // Kreuzungen zuerst: das wichtigste Signal auf der eingleisigen Strecke
-    crossings.forEach { x -> Banner("${x.train}: ${x.text}", kind = "warn") }
+    // mehrere Kreuzungen: ein Hinweis zum Aufklappen statt eines Stapels fast gleicher Banner
+    if (crossings.size == 1) crossings.forEach { x -> Banner("${x.train}: ${x.text}", kind = "warn") }
+    else if (crossings.size > 1) {
+        var open by remember { androidx.compose.runtime.mutableStateOf(false) }
+        Banner("${crossings.size} Züge warten auf Gegenzug", kind = "warn",
+            sub = if (open) crossings.joinToString("\n") { "${it.train}: ${it.text}" } else "Antippen für Details",
+            onClick = { open = !open })
+    }
 
     // ---------------------------------------------------------------- Geometrie in dp
     val seqs = (lo..hi).toList()

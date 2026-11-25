@@ -62,6 +62,8 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -91,18 +93,20 @@ private val WHITE = Color.White
 private val MONO = TextStyle(fontFamily = FontFamily.Monospace)
 
 /** Drei Farben je Folie (Verlauf). */
+// Verlaeufe so dunkel, dass weisse Schrift ueberall mindestens etwa 4,5:1 Kontrast hat (auch kleine Beschriftungen)
 private val PALETTE = listOf(
-    listOf(Color(0xFF0B5563), Color(0xFF0E7490), Color(0xFF14B8A6)),
-    listOf(Color(0xFFF97316), Color(0xFFDB2777), Color(0xFF6D28D9)),
-    listOf(Color(0xFF16A34A), Color(0xFF0D9488), Color(0xFF0B5563)),
-    listOf(Color(0xFFF59E0B), Color(0xFFEA580C), Color(0xFFB91C1C)),
-    listOf(Color(0xFF6366F1), Color(0xFF8B5CF6), Color(0xFFDB2777)),
-    listOf(Color(0xFF0EA5E9), Color(0xFF6366F1), Color(0xFF312E81)),
+    listOf(Color(0xFF0B5563), Color(0xFF0E7490), Color(0xFF0F766E)),
+    listOf(Color(0xFFC2410C), Color(0xFFBE185D), Color(0xFF6D28D9)),
+    listOf(Color(0xFF15803D), Color(0xFF0F766E), Color(0xFF0B5563)),
+    listOf(Color(0xFFB45309), Color(0xFFC2410C), Color(0xFF991B1B)),
+    listOf(Color(0xFF4F46E5), Color(0xFF7C3AED), Color(0xFFBE185D)),
+    listOf(Color(0xFF0369A1), Color(0xFF4F46E5), Color(0xFF312E81)),
     listOf(Color(0xFF0F172A), Color(0xFF1E3A5F), Color(0xFF0B5563)),
 )
 
 @Composable
 fun MonthReviewScreen(p: MonthReviews.Pending, history: List<RideMeta>, onClose: () -> Unit) {
+    de.rb64.live.ui.DialogEdgeToEdge()      // Verlauf bis unter die Statusleiste
     val ctx = LocalContext.current
     val data by produceState<MonthReviews.Data?>(null, p) { value = withContext(Dispatchers.IO) { MonthReviews.data(ctx, p, history) } }
     var page by remember { mutableIntStateOf(0) }
@@ -112,8 +116,12 @@ fun MonthReviewScreen(p: MonthReviews.Pending, history: List<RideMeta>, onClose:
     // Fortschritt der aktuellen Folie; laeuft weiter, wo er beim Pausieren stand
     val progress = remember(page) { Animatable(0f) }
     var sharing by remember { mutableStateOf(false) }
+    // Mit TalkBack nicht von selbst weiterblaettern - dann bestimmst du das Tempo (Aktionen "Naechste/Vorherige Folie")
+    val talkBack = remember {
+        ctx.getSystemService(android.view.accessibility.AccessibilityManager::class.java)?.isTouchExplorationEnabled == true
+    }
     LaunchedEffect(page, paused || sharing, data != null) {
-        if (data == null || paused || sharing) return@LaunchedEffect
+        if (data == null || paused || sharing || talkBack) return@LaunchedEffect
         progress.animateTo(1f, tween(((1f - progress.value) * SLIDE_MS).toInt(), easing = LinearEasing))
         if (page < PAGES - 1) page++
     }
@@ -122,13 +130,25 @@ fun MonthReviewScreen(p: MonthReviews.Pending, history: List<RideMeta>, onClose:
     val c0 by animateColorAsState(pal[0], tween(700), label = "c0")
     val c1 by animateColorAsState(pal[1], tween(700), label = "c1")
     val c2 by animateColorAsState(pal[2], tween(700), label = "c2")
+    // Hintergrund bewegt sich nur, wenn "Animationen" an ist (Einstellungen > Farbschema und Effekte)
+    val moving = de.rb64.live.ui.LocalVis.current.animations
     val inf = rememberInfiniteTransition(label = "bg")
-    val drift by inf.animateFloat(0f, 1f, infiniteRepeatable(tween(9_000, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "drift")
-    val spin by inf.animateFloat(0f, 360f, infiniteRepeatable(tween(40_000, easing = LinearEasing)), label = "spin")
-    val breathe by inf.animateFloat(0.92f, 1.08f, infiniteRepeatable(tween(3_500, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "breathe")
+    val driftA by inf.animateFloat(0f, 1f, infiniteRepeatable(tween(9_000, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "drift")
+    val spinA by inf.animateFloat(0f, 360f, infiniteRepeatable(tween(40_000, easing = LinearEasing)), label = "spin")
+    val breatheA by inf.animateFloat(0.92f, 1.08f, infiniteRepeatable(tween(3_500, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "breathe")
+    val drift = if (moving) driftA else 0.5f
+    val spin = if (moving) spinA else 0f
+    val breathe = if (moving) breatheA else 1f
 
     Box(Modifier.fillMaxSize()
         .background(Brush.linearGradient(listOf(c0, c1, c2), start = Offset(0f, 2000f * drift), end = Offset(1400f, 2400f - 1200f * drift)))
+        .semantics {
+            customActions = listOf(
+                androidx.compose.ui.semantics.CustomAccessibilityAction("Nächste Folie") { if (page < PAGES - 1) page++ else onClose(); true },
+                androidx.compose.ui.semantics.CustomAccessibilityAction("Vorherige Folie") { page = (page - 1).coerceAtLeast(0); true },
+                androidx.compose.ui.semantics.CustomAccessibilityAction(if (paused) "Weiter abspielen" else "Pause") { paused = !paused; true },
+            )
+        }
         .pointerInput(Unit) {
             detectTapGestures(
                 onTap = { o -> if (o.x < size.width / 3) page = (page - 1).coerceAtLeast(0) else if (page < PAGES - 1) page++ else onClose() },
@@ -222,9 +242,14 @@ private fun Big(value: Int, unit: String = "", i: Int = 1, rewind: Int = 0) {
         if (rewind > 0) { shown.animateTo(0f, tween(1_200, easing = LinearEasing)); delay(600); shown.animateTo(value.toFloat(), tween(600)) }
     }
     Enter(i) {
-        Text("${shown.value.toInt()}$unit", style = TextStyle(fontSize = 112.sp, fontWeight = FontWeight.Black, color = WHITE,
-            letterSpacing = (-4).sp, lineHeight = 116.sp),
-            modifier = Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f) })
+        // lange Einheiten ("Stempel") kleiner darunter - in 112 sp braechen sie mitten im Wort um
+        val long = unit.trim().length > 3
+        Column {
+            Text("${shown.value.toInt()}${if (long) "" else unit}", style = TextStyle(fontSize = 112.sp, fontWeight = FontWeight.Black,
+                color = WHITE, letterSpacing = (-4).sp, lineHeight = 116.sp), maxLines = 1,
+                modifier = Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f) })
+            if (long) Text(unit.trim(), style = TextStyle(fontSize = 40.sp, fontWeight = FontWeight.Black, color = WHITE, lineHeight = 44.sp))
+        }
     }
 }
 
@@ -271,23 +296,26 @@ private fun Slide(page: Int, d: MonthReviews.Data, rewind: Int) {
         }
         4 -> {
             Lead("Deine Gewohnheit")
-            Sub(d.favRoute ?: "Mal hier, mal da.", 1)
-            // Lieblingszeit verraet ein Muster - im Teilen-Bild nur mit "Details zeigen"
-            val fav = if (LocalShareMode.current?.details == false) null else d.favTime
+            // Lieblingsstrecke (Heimatbahnhof) und -zeit verraten ein Muster - im Teilen-Bild nur mit "Details zeigen"
+            val hide = LocalShareMode.current?.details == false
+            Sub(if (hide) "Deine Stammstrecke bleibt unter uns." else d.favRoute ?: "Mal hier, mal da.", 1)
+            val fav = if (hide) null else d.favTime
             Enter(2) { HabitClock(fav) }
             Body(fav?.let { "Meistens $it – da war Verlass auf dich." } ?: "Kein fester Zug – Freigeist.", 3)
         }
         5 -> {
             Lead("Neu in deiner Sammlung")
-            Big(d.newStations.size, if (d.newStations.size == 1) " Stempel" else " Stempel", rewind = rewind)
-            Enter(2) { StampRain(d.newStations.ifEmpty { listOf("RB64") }) }
+            if (d.newStations.isNotEmpty()) {
+                Big(d.newStations.size, if (d.newStations.size == 1) " neuer Stempel" else " neue Stempel", rewind = rewind)
+                Enter(2) { StampRain(d.newStations) }
+            } else Sub("Keine neuen Bahnhöfe – dein Stempelheft kennt deine Strecke schon auswendig.", 1)
             d.rarest?.takeIf { it.rarity > Rarity.COMMON }?.let { Body("Seltenster Spruch (${it.rarity.label}): „${it.text}“", 3) }
             if (d.variants.isNotEmpty()) Body("Varianten: ${d.variants.joinToString(", ")}", 4)
             if (d.doodles > 0) Body("${d.doodles}× hat jemand auf deine Karte gekritzelt.", 5)
         }
         else -> {
-            Lead("Das war dein ${d.name}")
-            Sub("Nächster Rückblick am 1. ${d.nextName}.", 1)
+            Sub("Das war dein ${d.name}", 0)
+            Body("Nächster Rückblick am 1. ${d.nextName}.", 1)
             Enter(2) { Confetti() }
             var ticker by remember { mutableStateOf(false) }
             Enter(3) {
@@ -368,8 +396,11 @@ private fun Bars(you: Int) {
 /** Eingleisig mit Ausweichstelle: ein Zug wartet, der Gegenzug faehrt durch, dann geht es weiter (Endlosschleife). */
 @Composable
 private fun CrossingLoop() {
+    // im Teilen-Bild und ohne Animationen ein fester Moment statt einer Endlosschleife
+    val still = LocalShareMode.current != null || !de.rb64.live.ui.LocalVis.current.animations
     val inf = rememberInfiniteTransition(label = "x")
-    val t by inf.animateFloat(0f, 1f, infiniteRepeatable(tween(5_000, easing = LinearEasing)), label = "xt")
+    val tA by inf.animateFloat(0f, 1f, infiniteRepeatable(tween(5_000, easing = LinearEasing)), label = "xt")
+    val t = if (still) 0.45f else tA
     Canvas(Modifier.fillMaxWidth().height(70.dp)) {
         val y = size.height * 0.62f; val w = size.width
         val l = w * 0.38f; val r = w * 0.62f; val up = 18.dp.toPx()
@@ -432,8 +463,10 @@ private fun StampRain(names: List<String>) {
 /** Fahrkarten-Konfetti zum Abschied. */
 @Composable
 private fun Confetti() {
+    val still = LocalShareMode.current != null || !de.rb64.live.ui.LocalVis.current.animations
     val inf = rememberInfiniteTransition(label = "conf")
-    val t by inf.animateFloat(0f, 1f, infiniteRepeatable(tween(6_000, easing = LinearEasing)), label = "ct")
+    val tA by inf.animateFloat(0f, 1f, infiniteRepeatable(tween(6_000, easing = LinearEasing)), label = "ct")
+    val t = if (still) 0.35f else tA
     val seeds = remember { List(28) { k -> Triple((k * 37 % 100) / 100f, (k * 53 % 100) / 100f, if (k % 3 == 0) Color(0xFFFDE68A) else WHITE) } }
     Canvas(Modifier.fillMaxWidth().height(160.dp)) {
         seeds.forEachIndexed { k, (fx, phase, col) ->
@@ -529,12 +562,21 @@ private fun ReviewShareSheet(d: MonthReviews.Data, page: Int, onClose: () -> Uni
         summary = if (details) "Du teilst die Zahlen deines Monats und deine Lieblingszeit."
         else "Du teilst die Zahlen deines Monats – ohne Uhrzeiten und ohne einzelne Fahrten.",
         ready = bmp.value != null,
-        onShare = { bmp.value?.let { b -> runCatching { Sharing.send(ctx, Sharing.save(ctx, listOf(b))) } }; onClose() },
+        onShare = {
+            bmp.value?.let { b -> runCatching { Sharing.send(ctx, Sharing.save(ctx, listOf(b))) } }
+                ?.onSuccess { onClose() }
+                ?.onFailure { android.widget.Toast.makeText(ctx, "Teilen hat nicht geklappt – bitte noch einmal versuchen.", android.widget.Toast.LENGTH_LONG).show() }
+        },
         onClose = onClose,
     ) {
-        androidx.compose.runtime.key(choice, details) {
-            Capture(STORY_W, STORY_H, 190.dp, onBitmap = { bmp.value = it }) {
-                SharedContent(details) { if (choice == 0) ReviewShareSummary(d, details) else ReviewSlideImage(page, d) }
+        // fest wie ein 412 dp breites Handy mit normaler Schrift - gleiches Bild auf jedem Geraet
+        val real = androidx.compose.ui.platform.LocalDensity.current
+        val sd = androidx.compose.ui.unit.Density(STORY_W / 412f, 1f)
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides sd) {
+            androidx.compose.runtime.key(choice, details) {
+                Capture(STORY_W, STORY_H, 190.dp * (real.density / sd.density), onBitmap = { bmp.value = it }) {
+                    SharedContent(details) { if (choice == 0) ReviewShareSummary(d, details) else ReviewSlideImage(page, d) }
+                }
             }
         }
     }

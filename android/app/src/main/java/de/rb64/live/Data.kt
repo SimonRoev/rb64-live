@@ -417,15 +417,32 @@ object Repo {
     fun pin(ctx: Context, r: Row, relId: String) {
         prefs(ctx).edit().putString("pin_train", r.train).putString("pin_rel", relId)
             .putLong("pin_until", r.arrEpoch + 30 * 60_000L).remove("pin_last_delay").apply()
-        Cloud.setPinUntil(ctx, r.arrEpoch + 30 * 60_000L)
+        // Server nur ein grobes Fenster melden (Ankunft+30 min auf die volle Stunde aufgerundet, plus 1 h), damit
+        // sich aus der Zeit nicht Zug und Ausstieg ableiten lassen; nur verlaengern, nie verkuerzen
+        val hour = 3_600_000L
+        val coarse = ((r.arrEpoch + 30 * 60_000L + hour - 1) / hour) * hour + hour
+        val sent = prefs(ctx).getLong("pin_sent_until", 0L)
+        if (coarse > sent) {
+            prefs(ctx).edit().putLong("pin_sent_until", coarse).apply()
+            Cloud.setPinUntil(ctx, coarse)
+        }
     }
 
+    /** Loslassen: dem Server nichts melden (das grobe Fenster laeuft von selbst aus) - sonst verraet der
+     *  Zeitpunkt des Loslassens (z. B. kurz nach der Ankunft) wieder den Zug. */
     fun unpin(ctx: Context) {
         prefs(ctx).edit().remove("pin_train").remove("pin_until").remove("pin_rel").apply()
-        Cloud.setPinUntil(ctx, 0L)
     }
 
     fun pinnedRelId(ctx: Context): String? = prefs(ctx).getString("pin_rel", null)
+
+    /** Geheimnis fuer "Ich fahre mit" aus der eigenen Meldung (fremde Apps kennen es nicht). */
+    fun checkinNonce(ctx: Context): String {
+        val p = prefs(ctx)
+        return p.getString("checkin_nonce", null) ?: java.util.UUID.randomUUID().toString().also {
+            p.edit().putString("checkin_nonce", it).apply()
+        }
+    }
 
     /** Dein Zug: auf dem Sperrbildschirm zeigen / bei Aenderung ab X min benachrichtigen. */
     fun pinLock(ctx: Context) = prefs(ctx).getBoolean("pin_lock", true)

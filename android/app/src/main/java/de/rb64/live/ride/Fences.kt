@@ -41,6 +41,13 @@ object Fences {
 
     fun enabled(ctx: Context) = Repo.prefs(ctx).getBoolean("fence_enabled", false)
 
+    /** Angehefteten Zug am Bahnhof automatisch aufzeichnen (freiwillig, standardmaessig aus). */
+    fun autoRide(ctx: Context) = Repo.prefs(ctx).getBoolean("auto_ride", false)
+    fun setAutoRide(ctx: Context, on: Boolean) = Repo.prefs(ctx).edit().putBoolean("auto_ride", on).apply()
+
+    /** Automatisch nur kurz vor der Abfahrt starten, damit GPS beim Warten nicht lange laeuft. */
+    private const val AUTO_BEFORE_MS = 20 * 60_000L
+
     fun hasPermissions(ctx: Context) =
         ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED &&
             ctx.checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -114,6 +121,15 @@ object Fences {
         }
         if (options.isEmpty()) return
         p.edit().putLong("prompt_$station", now).apply()
+
+        // angehefteter Zug faehrt gleich ab und "automatisch aufzeichnen" ist an: direkt starten statt fragen.
+        // Steigst du nicht ein, verwirft der Fahrt-Dienst die Aufzeichnung von selbst (siehe RideService).
+        if (pinned != null && autoRide(ctx) && pinned.second.depEpoch - now <= AUTO_BEFORE_MS) {
+            val info = RideService.infoFrom(pinned.first, pinned.second)
+            p.edit().putString("ride_auto", info.id).apply()
+            if (runCatching { RideService.start(ctx, info) }.isSuccess) return
+            p.edit().remove("ride_auto").apply()
+        }
 
         // angehefteter Zug faehrt hier ab und steht ohnehin als Live Update da: keine zweite Meldung,
         // sondern das Live Update einmal hervorheben und "Los, ich fahre mit" sofort anbieten

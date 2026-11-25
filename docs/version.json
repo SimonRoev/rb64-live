@@ -1,10 +1,10 @@
 {
-  "versionCode": 15,
-  "versionName": "0.15",
-  "date": "2026-11-24",
+  "versionCode": 16,
+  "versionName": "0.16",
+  "date": "2026-11-25",
   "url": "https://simonroev.github.io/rb64-live/download/rb64-live.apk",
   "page": "https://simonroev.github.io/rb64-live/#download",
-  "sha256": "d25becea96b17f5dec863100ce82423824c35687f67647144beef617f4fec2ef",
-  "size": 31038169,
-  "notes": "Monatsrückblick als Story, Fahrkarte und Rückblick als Bild teilen, neue Kartenvarianten und Kritzeleien, Link zum Fahrgastrechte-Antrag"
+  "sha256": "4fc5327feaf5e690de5eba20ab98f02d5f37107f0bd85777ac382eb23355ca74",
+  "size": 6417169,
+  "notes": "Alle Karten auf einen Blick, automatisch aufzeichnen, sparsamer mit Daten, App fünfmal kleiner"
 }

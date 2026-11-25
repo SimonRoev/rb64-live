@@ -30,6 +30,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -470,7 +472,7 @@ private fun Bottom(t: Ticket) {
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             // seltene Sprueche/Varianten bekommen ein kleines Zeichen hinter der Nummer
             // Seltenheit steht bewusst nicht auf der Karte - sie zeigt sich nur im Stempelheft
-            if (LocalShareMode.current == null) Text("Nr. ${t.serial}", style = MONO.copy(fontSize = 9.sp, color = Color(0xFF9CA3AF)), maxLines = 1)
+            if (LocalShareMode.current == null) Text("Nr. ${t.serial}", style = MONO.copy(fontSize = 9.sp, color = GREY), maxLines = 1)
         }
         Spacer(Modifier.width(8.dp))
         EntwerterStamp(t)
@@ -490,7 +492,7 @@ private fun EntwerterStamp(t: Ticket) {
     val (top, mid, bot) = when {
         t.cls == TicketClass.SPECIAL -> Triple("SONDER", "✦", "ZUG")
         d == null -> Triple("OHNE", "?", "MESSUNG")
-        d == 0 && t.cls == TicketClass.FIRST -> Triple("AM ZIEL", "±0", "AUF DIE MIN")
+        d == 0 && t.cls == TicketClass.FIRST -> Triple("AM ZIEL", "±0", "EXAKT")      // kurz: passt in den Ring
         d <= 0 -> Triple("AM ZIEL", "✓", "PÜNKTLICH")
         else -> Triple("AM ZIEL", "+$d", "MIN")
     }
@@ -575,7 +577,7 @@ private fun TicketBack(t: Ticket) {
         Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("RÜCKSEITE", style = SANS.copy(fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp, color = PETROL), modifier = Modifier.weight(1f))
-                if (LocalShareMode.current == null) Text("Nr. ${t.serial}", style = MONO.copy(fontSize = 10.sp, color = Color(0xFF9CA3AF)))
+                if (LocalShareMode.current == null) Text("Nr. ${t.serial}", style = MONO.copy(fontSize = 10.sp, color = GREY))
             }
             val rows = buildList {
                 add("Fahrzeit" to "${t.minutes} min"); add("Strecke" to "%.0f km".format(t.km))
@@ -680,7 +682,8 @@ private fun BeilegerView(t: Ticket, b: Beileger) {
                 // ab 60 min echter Anspruch: Antrag bei der DB (Frist 3 Monate nach der Fahrt)
                 if (b.delay >= 60) {
                     val left = (t.started + 92L * 86_400_000L - System.currentTimeMillis()) / 86_400_000L
-                    if (left > 0) Text("Bei der DB beantragen (noch $left Tage) →", style = MONO.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PETROL),
+                    // Restfrist verraet im Teilen-Bild ohne Details den Fahrttag -> dann weglassen
+                    if (left > 0 && LocalShareMode.current?.details != false) Text("Bei der DB beantragen (noch $left Tage) →", style = MONO.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PETROL),
                         modifier = Modifier.padding(top = 6.dp).clickable {
                             runCatching {
                                 ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
@@ -770,14 +773,14 @@ private fun TicketShareImage(t: Ticket, back: Boolean, details: Boolean) {
 @Composable
 fun TicketShareSheet(t: Ticket, onClose: () -> Unit) {
     val ctx = LocalContext.current
-    val density = LocalDensity.current
+    val real = LocalDensity.current
     var both by remember { mutableStateOf(false) }
     var details by remember { mutableStateOf(false) }
-    // Hoehe aus der Breite: Karte 380:480, dazu Rand und Fusszeile
-    val hPx = with(density) {
-        val w = SHARE_W.toDp() - 48.dp
-        (w * (480f / 380f) + 48.dp + 34.dp).roundToPx()
-    }
+    // Immer in Originalgroesse zeichnen (Karte 380 x 480 dp plus Rand und Fusszeile), unabhaengig von Bildschirmdichte
+    // und Schriftgroesse des Handys - sonst wird die Karte flacher und der Platzzettel abgeschnitten.
+    val sd = androidx.compose.ui.unit.Density(SHARE_W / (380f + 48f), 1f)
+    val hPx = with(sd) { (480.dp + 48.dp + 34.dp).roundToPx() }
+    val pw = { d: androidx.compose.ui.unit.Dp -> d * (real.density / sd.density) }   // Vorschaubreite in echten dp
     val front = remember(details) { mutableStateOf<android.graphics.Bitmap?>(null) }
     val back = remember(details, both) { mutableStateOf<android.graphics.Bitmap?>(null) }
     ShareFrame(
@@ -790,11 +793,31 @@ fun TicketShareSheet(t: Ticket, onClose: () -> Unit) {
         onShare = {
             val list = listOfNotNull(front.value, if (both) back.value else null)
             runCatching { Sharing.send(ctx, Sharing.save(ctx, list)) }
-            onClose()
+                .onSuccess { onClose() }
+                .onFailure { android.widget.Toast.makeText(ctx, "Teilen hat nicht geklappt – bitte noch einmal versuchen.", android.widget.Toast.LENGTH_LONG).show() }
         },
         onClose = onClose,
     ) {
-        key(details) { Capture(SHARE_W, hPx, if (both) 150.dp else 240.dp, onBitmap = { front.value = it }) { TicketShareImage(t, back = false, details = details) } }
-        if (both) key(details, "back") { Capture(SHARE_W, hPx, 150.dp, onBitmap = { back.value = it }) { TicketShareImage(t, back = true, details = details) } }
+        androidx.compose.runtime.CompositionLocalProvider(LocalDensity provides sd) {
+            key(details) { Capture(SHARE_W, hPx, pw(if (both) 150.dp else 240.dp), onBitmap = { front.value = it }) { TicketShareImage(t, back = false, details = details) } }
+            if (both) key(details, "back") { Capture(SHARE_W, hPx, pw(150.dp), onBitmap = { back.value = it }) { TicketShareImage(t, back = true, details = details) } }
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ Kartenalbum */
+
+/**
+ * Kleine Vorderseite fuer das Kartenalbum: in Originalgroesse gezeichnet und verkleinert, ruhig wie im Teilen-Bild
+ * (kein Kippen, keine Lagesensoren je Karte). Gesten faengt das Album ab, angetippt wird die ganze Karte.
+ */
+@Composable
+fun TicketMini(t: Ticket, modifier: Modifier = Modifier) {
+    BoxWithConstraints(modifier.fillMaxWidth().aspectRatio(380f / 480f)) {
+        val scale = maxWidth / 380.dp
+        Box(Modifier.wrapContentSize(Alignment.TopStart, unbounded = true).requiredSize(380.dp, 480.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f) }) {
+            SharedContent(true) { TicketFront(t) }
+        }
     }
 }

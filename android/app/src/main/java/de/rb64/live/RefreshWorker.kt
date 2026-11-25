@@ -7,11 +7,11 @@ import de.rb64.live.widget.Rb64WidgetProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** Fordert frische Daten an (Antwort kommt per Firebase) und zeichnet das Widget neu,
- *  damit abgefahrene Zuege nach oben wandern und um 13 Uhr die Richtung wechselt. */
+/** Zeichnet das Widget neu, damit abgefahrene Zuege nach oben wandern und um 13 Uhr die Richtung wechselt.
+ *  Neue Daten fordert er nicht an: der Server schickt ohnehin spaetestens alle 5 min - eine Anfrage alle 15 min
+ *  von jedem Geraet wuerde sonst jedes Mal eine Sonder-Sendung ausloesen. */
 class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
-        withContext(Dispatchers.Main) { Repo.requestRefresh(applicationContext) }
         Rb64WidgetProvider.updateAll(applicationContext)
         // am 1. des Monats: einmal melden, dass der Monatsrueckblick da ist
         runCatching { de.rb64.live.ride.MonthReviews.notifyIfDue(applicationContext) }

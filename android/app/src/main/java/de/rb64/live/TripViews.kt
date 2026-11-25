@@ -27,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -138,6 +139,7 @@ fun HeroCard(
     onOpen: () -> Unit, onRide: () -> Unit, onStopRide: () -> Unit,
     pinned: Boolean = false, rideDeparted: Boolean = false,
     vehicle: VehicleView? = null, onTogglePin: (() -> Unit)? = null,
+    notes: List<String> = emptyList(),
 ) {
     // Fahrzeug noch unterwegs zur Wende: dann steht der Zug nicht schon am Einstieg
     @Suppress("NAME_SHADOWING") val r = if (vehicle != null && vehicle.state != VehicleView.State.ARRIVED && r.marker == 0.0) r.copy(marker = -1.0) else r
@@ -182,7 +184,7 @@ fun HeroCard(
             }
             RollingText(big, if (vis.bigTime) Ts.heroXL else Ts.hero, if (r.cancelled) Rb.c.bad else Rb.c.onSurface)
             Spacer(Modifier.height(Dim.s4))
-            TimesLine(r, stale, big = true)
+            HeroTimes(r, stale)
         } else {
             // ohne "in X min": Abfahrt gross (Plan klein daneben), darunter nur die Ankunft
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Dim.s8)) {
@@ -193,17 +195,17 @@ fun HeroCard(
             Text("→ ${r.arrExpected}" + (r.arrPlatform?.let { " · an Gl. $it" } ?: ""), style = Ts.title, color = r.arrColor(stale))
         }
         if (vis.stopStrip && !r.cancelled && !r.bus && r.stops.size >= 2) {
-            Spacer(Modifier.height(Dim.s12))
-            StopStrip(r, stale)
+            if (r.marker in 0.0..1.0 && r.marker > 0.0) { Spacer(Modifier.height(Dim.s12)); StopStrip(r, stale) }
+            else if (r.before != null && vehicle == null) { Spacer(Modifier.height(Dim.s12)); ApproachStrip(r, stale) }
         }
-        if (vehicle == null) r.before?.takeIf { !r.cancelled }?.let {
-            Spacer(Modifier.height(Dim.s8))
-            Text(r.whereText() ?: "", style = Ts.small, color = Rb.c.muted)
-        }
+        // Status in einer Zeile: wo der Zug ist und warum er spaeter kommt
         val why = if (r.cancelled) null else r.reason?.replaceFirstChar { it.uppercase() }
-        if (why != null) {
+            ?.let { if (r.ownForecast && vis.source) "Vermutlich: $it" else it }
+        val where = if (vehicle == null && !r.cancelled) r.whereText() else null
+        val status = listOfNotNull(where, why).joinToString(" · ")
+        if (status.isNotEmpty()) {
             Spacer(Modifier.height(Dim.s8))
-            Text(if (r.ownForecast && vis.source) "Vermutlich: $why" else why, style = Ts.text, color = Rb.c.onSurface)
+            Text(status, style = Ts.text, color = Rb.c.onSurface, maxLines = 3)
         }
         // "Wo ist mein Zug?": Fahrzeug, das gleich als dieser Zug faehrt (nur vor dem Start)
         if (vehicle != null && !r.cancelled && !rideDeparted) {
@@ -211,7 +213,9 @@ fun HeroCard(
             VehicleLine(vehicle)
         }
         val src = if (vis.source) r.sourceText() else null
-        val hist = if (vis.history) r.histShort() else null
+        // "meist +7" nur zeigen, wenn es heute anders ist - sonst steht dieselbe Zahl doppelt da
+        val hist = if (vis.history && r.hist?.let { r.cancelled || kotlin.math.abs(it.median - r.depDelay) >= 2 } == true)
+            r.histShort()?.let { "sonst $it" } else null
         if (src != null || hist != null) {
             Spacer(Modifier.height(Dim.s8))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -223,17 +227,102 @@ fun HeroCard(
                 if (hist != null) Text(hist, style = Ts.small, color = Rb.c.muted)
             }
         }
-        // Hauptaktion: erst anheften (dann Sperrbildschirm/Live Update), angeheftet dann "Ich fahre mit"
+        // Hauptaktion: angeheftet "Ich fahre mit" (gross); Anheften selbst ist eine Nebenaktion (leise, rechts)
         val canPin = onTogglePin != null && !pinned && !r.cancelled && r.arrEpoch > now
-        if (rideHere || canRide || canPin) {
+        if (rideHere || (canRide && !canPin)) {
             Spacer(Modifier.height(Dim.s12))
-            when {
-                rideHere -> RbButton(if (rideDeparted) "Aufzeichnung läuft · beenden" else "Aufzeichnung abbrechen",
-                    onStopRide, Modifier.fillMaxWidth(), icon = RbIcons.stop, primary = false)
-                canPin -> RbButton("Als meinen Zug anheften", onTogglePin!!, Modifier.fillMaxWidth(), icon = RbIcons.pin)
-                else -> RbButton("Ich fahre mit", onRide, Modifier.fillMaxWidth(), icon = RbIcons.play)
+            if (rideHere) RbButton(if (rideDeparted) "Aufzeichnung läuft · beenden" else "Aufzeichnung abbrechen",
+                onStopRide, Modifier.fillMaxWidth(), icon = RbIcons.stop, primary = false)
+            else RbButton("Ich fahre mit", onRide, Modifier.fillMaxWidth(), icon = RbIcons.play)
+        }
+        if (notes.isNotEmpty() || (canPin && !rideHere)) {
+            Spacer(Modifier.height(Dim.s12))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dim.s8)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Dim.s4)) {
+                    notes.forEach { NoteChip(it) }
+                }
+                if (canPin && !rideHere) RbButton("Anheften", onTogglePin!!, icon = RbIcons.pin, primary = false)
             }
         }
+    }
+}
+
+/** Kurzer Hinweis (z. B. Wetterwarnung) als kleiner Chip in der Karte statt als Banner darueber. */
+@Composable
+private fun NoteChip(text: String) {
+    Row(Modifier.clip(RoundedCornerShape(999.dp)).background(Rb.c.warnBg).padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(RbIcons.warning, null, tint = Rb.c.warn, modifier = Modifier.size(14.dp))
+        Spacer(Modifier.width(Dim.s4))
+        Text(text.removePrefix("Wetterwarnung: "), style = Ts.small, color = Rb.c.warn, maxLines = 2)
+    }
+}
+
+/** Zeiten des naechsten Zugs in einer Zeile: "15:14  statt 15:07 · an Haeger 15:36 · Gl. 1". */
+@Composable
+private fun HeroTimes(r: Row, stale: Boolean) {
+    val strike = if (r.cancelled) TextDecoration.LineThrough else null
+    val dest = r.stops.lastOrNull()?.name
+    val rest = buildList {
+        if (!r.cancelled && r.depDelay >= 1) add("statt ${r.depPlanned}")
+        if (dest != null) add("an $dest ${if (r.cancelled) r.arrPlanned else r.arrExpected}")
+        if (!r.cancelled) r.platform?.let { add("Gl. $it") }
+    }.joinToString(" · ")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(if (r.cancelled) r.depPlanned else r.depExpected, style = Ts.title, color = r.depColor(stale), textDecoration = strike)
+        Spacer(Modifier.width(Dim.s8))
+        Text(rest, style = Ts.text, color = Rb.c.muted, textDecoration = strike, modifier = Modifier.weight(1f, fill = false))
+        if (!r.cancelled) { Spacer(Modifier.width(Dim.s4)); SourceIcon(r) }
+    }
+}
+
+/**
+ * Vor der Abfahrt: wie der Zug auf deinen Bahnhof zufaehrt (wie die Live-Karte auf dem Sperrbildschirm) -
+ * bis zu drei Halte davor und dein Bahnhof, der Zug als Symbol dort, wo er laut Daten gerade ist.
+ */
+@Composable
+fun ApproachStrip(r: Row, stale: Boolean) {
+    val home = r.stops.firstOrNull()?.name ?: return
+    val at = r.before ?: return
+    val hs = LiveCard.seqOf(home); val bs = LiveCard.seqOf(at)
+    if (hs <= 0 || bs <= 0) return
+    // Richtung: vom Ort des Zugs auf den Einstieg zu (steht er schon da, aus Richtung der Fahrt davor)
+    val dir = when {
+        bs != hs -> if (bs < hs) 1 else -1
+        r.stops.size >= 2 && LiveCard.seqOf(r.stops[1].name) > hs -> 1
+        else -> -1
+    }
+    val near = kotlin.math.abs(hs - bs) <= 3
+    val first = (if (near && bs != hs) bs else hs - 3 * dir).coerceIn(1, de.rb64.live.ride.Stations.all.size)
+    val seqs = generateSequence(first) { it + dir }.takeWhile { (it - hs) * dir <= 0 }.toList()
+    if (seqs.size < 2) return
+    val names = seqs.map { de.rb64.live.ride.Stations.all[it - 1].name }
+    val n = names.size
+    val trainAt = if (near) seqs.indexOf(bs).coerceAtLeast(0) else 0
+    val col = if (stale) Rb.c.graphic else delayColor(r.depDelay, false) ?: Rb.c.primary
+    val track = Rb.c.line
+    val surface = Rb.c.surface
+    val graphic = Rb.c.graphic
+    BoxWithConstraints(Modifier.fillMaxWidth().height(46.dp)) {
+        val w = maxWidth
+        fun x(i: Int) = (w - 16.dp) * (i.toFloat() / (n - 1)) + 8.dp
+        Box(Modifier.offset(x = 8.dp, y = 12.dp).width(w - 16.dp).height(4.dp).clip(RoundedCornerShape(999.dp)).background(track))
+        if (trainAt > 0) Box(Modifier.offset(x = 8.dp, y = 12.dp).width(x(trainAt) - 8.dp).height(4.dp)
+            .clip(RoundedCornerShape(999.dp)).background(col.copy(alpha = 0.5f)))
+        names.forEachIndexed { i, _ ->
+            val homeDot = i == n - 1
+            Box(Modifier.offset(x = x(i) - 6.dp, y = 8.dp).size(12.dp).clip(CircleShape)
+                .background(surface).border(2.dp, if (homeDot) Rb.c.onSurface else graphic, CircleShape))
+        }
+        // Zug in Seitenansicht (wie auf dem Sperrbildschirm); weiter weg: am linken Rand, halb transparent
+        androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.ic_tracker), null,
+            modifier = Modifier.offset(x = x(trainAt) - 16.dp, y = 0.dp).width(32.dp).height(16.dp)
+                .alpha(if (near) 1f else 0.55f))
+        // Beschriftung: wo der Zug ist (links) und dein Bahnhof (rechts)
+        Text(if (near) names[trainAt] else "… $at", style = Ts.small, color = Rb.c.muted, maxLines = 1,
+            modifier = Modifier.offset(y = 26.dp).width(w * 0.5f))
+        Text(home, style = Ts.small, color = Rb.c.onSurface, maxLines = 1, textAlign = TextAlign.End,
+            modifier = Modifier.offset(x = w * 0.5f, y = 26.dp).width(w * 0.5f))
     }
 }
 
@@ -280,7 +369,7 @@ fun StopStrip(r: Row, stale: Boolean) {
     val track = Rb.c.line
     val graphic = Rb.c.graphic
     val surface = Rb.c.surface
-    val nextIdx = if (pos >= 0) kotlin.math.ceil(pos).toInt().coerceIn(0, n - 1) else 0
+    val nextIdx = if (pos >= 0) kotlin.math.ceil(pos).toInt().coerceIn(0, maxOf(0, n - 1)) else 0
     BoxWithConstraints(Modifier.fillMaxWidth().height(40.dp)) {
         val w = maxWidth
         fun x(i: Double) = (w - 16.dp) * (i / (n - 1)).toFloat() + 8.dp
@@ -298,7 +387,7 @@ fun StopStrip(r: Row, stale: Boolean) {
                 Text(s.name, style = Ts.small, maxLines = 1,
                     color = if (s.hang) Rb.c.warn else if (i == 0 || i == n - 1) Rb.c.onSurface else Rb.c.muted,
                     textAlign = when (i) { 0 -> TextAlign.Start; n - 1 -> TextAlign.End; else -> TextAlign.Center },
-                    modifier = Modifier.offset(x = align.coerceIn(0.dp, w - 96.dp), y = 20.dp).width(96.dp))
+                    modifier = Modifier.offset(x = align.coerceIn(0.dp, maxOf(0.dp, w - 96.dp)), y = 20.dp).width(96.dp))
             }
         }
         if (pos >= 0) Box(Modifier.offset(x = x(pos) - 8.dp, y = 0.dp).size(16.dp).clip(CircleShape).background(train)
@@ -344,11 +433,24 @@ fun TripSheet(
             if (onShowMap != null && !r.cancelled) de.rb64.live.ui.TextAction("Auf der Strecke ansehen", RbIcons.route, onShowMap,
                 Modifier.padding(top = 2.dp).offset(x = (-8).dp))
         }
+    }, footer = {
+        // Hauptknopf fest unten: Anheften (dein Zug auf Sperrbildschirm/Live Update); angeheftet: "Ich fahre mit"
+        val canPin = onTogglePin != null && !r.cancelled && r.arrEpoch > now
+        when {
+            rideHere -> RbButton("Aufzeichnung läuft · beenden", onStopRide, Modifier.fillMaxWidth(), icon = RbIcons.stop, primary = false)
+            canPin && !pinned -> RbButton("Als meinen Zug anheften", onTogglePin!!, Modifier.fillMaxWidth(), icon = RbIcons.pin)
+            canRide -> RbButton("Ich fahre mit", onRide, Modifier.fillMaxWidth(), icon = RbIcons.play)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dim.s8, Alignment.CenterHorizontally)) {
+            if (!rideHere && canRide && !pinned && canPin) de.rb64.live.ui.TextAction("Ich fahre mit", RbIcons.play, onRide)
+            if (canPin && pinned) de.rb64.live.ui.TextAction("Nicht mehr anheften", RbIcons.pin, onTogglePin!!)
+            if (onToggleNotify != null && !r.bus)
+                de.rb64.live.ui.TextAction(if (notifyOn) "Nicht mehr melden" else "Bei Verspätung melden", RbIcons.announce, onToggleNotify)
+        }
     }) {
-        // nach der Abfahrt: wie lagen Prognose und DB?
-        if (pcheck != null) PCheckCard(pcheck)
-        // Woher kommt die Zahl?
         val vis = LocalVis.current
+        if (stale) de.rb64.live.ui.Banner("Daten veraltet – Zeiten können nicht mehr stimmen")
+        // Status in einer Zeile oben: wo der Zug ist und warum (eigene Prognose mit Erklaerung)
         if (r.ownForecast && vis.source) Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(Dim.rButton)).background(Rb.c.primaryTint).padding(Dim.s12),
             horizontalArrangement = Arrangement.spacedBy(Dim.s8),
@@ -356,31 +458,23 @@ fun TripSheet(
             Icon(RbIcons.trend, null, tint = Rb.c.primary, modifier = Modifier.size(Dim.icon))
             Column(verticalArrangement = Arrangement.spacedBy(Dim.s4)) {
                 Text(r.sourceText() ?: "", style = Ts.textStrong, color = Rb.c.primary)
-                Text((r.reason?.let { "Vermutlich: ${it.replaceFirstChar { c -> c.uppercase() }}. " } ?: "") +
-                    "Berechnet aus Umlauf und Kreuzungen – die DB meldet das oft erst später.", style = Ts.small, color = Rb.c.onSurface)
+                Text(listOfNotNull(r.whereText(), r.reason?.let { "vermutlich ${it}" }).joinToString(" · ") +
+                    ". Berechnet aus Umlauf und Kreuzungen – die DB meldet das oft erst später.", style = Ts.small, color = Rb.c.onSurface)
             }
-        } else {
-            r.reason?.takeIf { !r.cancelled }?.let { Text(it.replaceFirstChar { c -> c.uppercase() }, style = Ts.text) }
-            if (!r.cancelled && !r.bus && r.dbDelay != null) Text("Unsere Prognose und die DB sagen dasselbe", style = Ts.small, color = Rb.c.muted)
+        } else if (!r.cancelled) {
+            val line = listOfNotNull(r.whereText(), r.reason?.replaceFirstChar { c -> c.uppercase() }).joinToString(" · ")
+            if (line.isNotEmpty()) Text(line, style = Ts.text)
+            if (!r.bus && r.dbDelay != null) Text("Unsere Prognose und die DB sagen dasselbe", style = Ts.small, color = Rb.c.muted)
         }
-        if (!r.cancelled && vis.history) {
-            if (histSeries != null) HistChart(histSeries, today = r.depDelay.coerceAtLeast(0))
-            else r.histLong(weekday)?.let { Text(it, style = Ts.small, color = Rb.c.muted) }
-        }
-        if (stale) de.rb64.live.ui.Banner("Daten veraltet – Zeiten können nicht mehr stimmen")
-        if (vehicle != null && !r.cancelled) VehicleBlock(vehicle, r.train, rel.from, r.depExpected, myDelay = r.depDelay)
-
         // Zuglauf (Zeilen 48)
         if (r.stops.isNotEmpty() && !r.cancelled) Column {
-            if (r.before != null) Text(r.whereText() ?: "", style = Ts.small, color = Rb.c.muted,
-                modifier = Modifier.padding(bottom = Dim.s8))
             val pos = herePos(r)
             val train = if (stale) Rb.c.graphic else delayColor(r.depDelay, false) ?: Rb.c.primary
             // Lange Zuglaeufe kompakt: Einstieg, Ziel, Zugposition und Kreuzungshalte; der Rest auf Antippen
             var allStops by androidx.compose.runtime.saveable.rememberSaveable(r.train) { mutableStateOf(r.stops.size <= 5) }
             val keep = if (allStops) r.stops.indices.toSet() else buildSet {
                 add(0); add(r.stops.lastIndex)
-                if (pos >= 0) add(kotlin.math.round(pos).toInt().coerceIn(0, r.stops.lastIndex))
+                if (pos >= 0 && r.stops.isNotEmpty()) add(kotlin.math.round(pos).toInt().coerceIn(0, r.stops.lastIndex))
                 r.stops.forEachIndexed { i, s -> if (s.hang) add(i) }
             }
             r.stops.forEachIndexed { i, s ->
@@ -438,19 +532,12 @@ fun TripSheet(
                     .heightIn(min = Dim.touch).padding(horizontal = Dim.s8, vertical = 14.dp))
         }
 
-        // Hauptknopf: Anheften (dein Zug auf Sperrbildschirm/Live Update); angeheftet: "Ich fahre mit".
-        // Alles andere als kleinere Textknoepfe darunter.
-        val canPin = onTogglePin != null && !r.cancelled && r.arrEpoch > now
-        when {
-            rideHere -> RbButton("Aufzeichnung läuft · beenden", onStopRide, Modifier.fillMaxWidth(), icon = RbIcons.stop, primary = false)
-            canPin && !pinned -> RbButton("Als meinen Zug anheften", onTogglePin!!, Modifier.fillMaxWidth(), icon = RbIcons.pin)
-            canRide -> RbButton("Ich fahre mit", onRide, Modifier.fillMaxWidth(), icon = RbIcons.play)
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dim.s8, Alignment.CenterHorizontally)) {
-            if (!rideHere && canRide && !pinned && canPin) de.rb64.live.ui.TextAction("Ich fahre mit", RbIcons.play, onRide)
-            if (canPin && pinned) de.rb64.live.ui.TextAction("Nicht mehr anheften", RbIcons.pin, onTogglePin!!)
-            if (onToggleNotify != null && !r.bus)
-                de.rb64.live.ui.TextAction(if (notifyOn) "Nicht mehr melden" else "Bei Verspätung melden", RbIcons.announce, onToggleNotify)
+        if (vehicle != null && !r.cancelled) VehicleBlock(vehicle, r.train, rel.from, r.depExpected, myDelay = r.depDelay)
+        // nach der Abfahrt: wie lagen Prognose und DB?
+        if (pcheck != null) PCheckCard(pcheck)
+        if (!r.cancelled && vis.history) {
+            if (histSeries != null) HistChart(histSeries, today = r.depDelay.coerceAtLeast(0))
+            else r.histLong(weekday)?.let { Text(it, style = Ts.small, color = Rb.c.muted) }
         }
     }
 }

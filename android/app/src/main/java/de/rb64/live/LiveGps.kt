@@ -55,6 +55,7 @@ object LiveGps {
         val now = System.currentTimeMillis()
         if (now - lastSent < SEND_MS) return
         val seq = seqAt(lat, lon) ?: return
+        main.removeCallbacks(pendingDelete)         // es wird wieder gesendet: kein spaetes Loeschen
         lastSent = now
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
         FirebaseFirestore.getInstance().collection("live").document(uid).set(mapOf(
@@ -67,9 +68,17 @@ object LiveGps {
     fun stop() {
         lastSent = 0L
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
-        FirebaseFirestore.getInstance().collection("live").document(uid).delete()
-            .addOnFailureListener { Log.w(TAG, "Live-Position nicht geloescht", it) }
+        // Die Regeln erlauben das Loeschen erst 20 s nach der letzten Meldung (Schutz der Sendebremse) - deshalb
+        // 25 s warten; sendet bis dahin wieder jemand (neue Fahrt), faellt das Loeschen aus
+        main.removeCallbacks(pendingDelete)
+        pendingDelete = Runnable {
+            FirebaseFirestore.getInstance().collection("live").document(uid).delete()
+                .addOnFailureListener { Log.w(TAG, "Live-Position nicht geloescht (die VM raeumt sie nach 15 min weg)", it) }
+        }
+        main.postDelayed(pendingDelete, 25_000L)
     }
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private var pendingDelete = Runnable {}
 
     /** Push "live" von der VM: [[Zug, seq, km/h, Alter s], ...]; gespeichert (loest Neuzeichnen aus). */
     fun onPush(ctx: Context, json: String?) {
@@ -96,7 +105,14 @@ object LiveGps {
 
 /** Snapshot mit Live-Positionen: Zugposition aus GPS statt aus Fahrplan/Echtzeit, markiert als gps. */
 fun Snapshot.withLiveGps(ctx: Context): Snapshot {
-    val live = LiveGps.positions(ctx)
+    val live = LiveGps.positions(ctx).mapValues { it.value.seq }.toMutableMap()
+    // eigene Fahrt: immer die eigene GPS-Position zeigen, bis zum Ziel - nur auf diesem Handy, es wird nichts gesendet
+    // (das Teilen endet absichtlich am vorletzten Halt, damit niemand den Ausstieg sieht)
+    de.rb64.live.ride.RideStore.state.value?.let { s ->
+        val p = s.points.lastOrNull()
+        if (p != null && System.currentTimeMillis() - p.t < 60_000L && de.rb64.live.ride.RideService.isDeparted(s))
+            LiveGps.seqAt(p.lat, p.lon)?.let { live[s.info.train] = it }
+    }
     if (live.isEmpty()) return this
-    return copy(trips = trips.map { t -> live[t.train]?.let { t.copy(pos = it.seq, gps = true) } ?: t })
+    return copy(trips = trips.map { t -> live[t.train]?.let { t.copy(pos = it, gps = true) } ?: t })
 }

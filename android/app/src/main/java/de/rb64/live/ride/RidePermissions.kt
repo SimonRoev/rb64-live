@@ -76,8 +76,8 @@ fun RidePermissionsCard() {
         if (ok) { prefs.edit().putBoolean("fence_enabled", true).apply(); Fences.sync(ctx) }
         tick++
     }
-    val askFine = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { tick++ }
-    val askFineThenBackground = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+    val askFine = rememberLauncherForActivityResult(de.rb64.live.ui.FineLocation()) { tick++ }
+    val askFineThenBackground = rememberLauncherForActivityResult(de.rb64.live.ui.FineLocation()) { ok ->
         if (ok) askBackground.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION); tick++
     }
     val askNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { tick++ }

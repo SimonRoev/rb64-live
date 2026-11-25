@@ -36,21 +36,25 @@ class Rb64WidgetProvider : AppWidgetProvider() {
         ids.forEach { mgr.updateAppWidget(it, v) }
     }
 
-    override fun onReceive(ctx: Context, intent: Intent) {
-        when (intent.action) {
-            ACTION_SWAP -> { Repo.toggleDirection(ctx); updateAll(ctx) }
-            ACTION_PAST -> { Repo.togglePast(ctx); updateAll(ctx); scheduleRender(ctx, 3 * 60 + 5) }
-            ACTION_REFRESH -> {
-                Repo.markRefreshing(ctx)
-                updateAll(ctx)
-                scheduleRender(ctx, 42)          // falls keine Antwort kommt: Anzeige zuruecksetzen
-                Repo.requestRefresh(ctx)
-            }
-            else -> super.onReceive(ctx, intent)
-        }
-    }
+    // Knoepfe im Widget gehen an WidgetActions (nicht exportiert) - dieser Empfaenger ist fuer den Launcher
+    // exportiert und nimmt deshalb keine eigenen Aktionen mehr an (sonst koennte jede App sie ausloesen).
+
 
     companion object {
+        /** Knopf im Widget (nur ueber WidgetActions erreichbar). */
+        fun handleAction(ctx: Context, action: String?) {
+            when (action) {
+                ACTION_SWAP -> { Repo.toggleDirection(ctx); updateAll(ctx) }
+                ACTION_PAST -> { Repo.togglePast(ctx); updateAll(ctx); scheduleRender(ctx, 3 * 60 + 5) }
+                ACTION_REFRESH -> {
+                    Repo.markRefreshing(ctx)
+                    updateAll(ctx)
+                    scheduleRender(ctx, 42)          // falls keine Antwort kommt: Anzeige zuruecksetzen
+                    Repo.requestRefresh(ctx)
+                }
+            }
+        }
+
         const val ACTION_SWAP = "de.rb64.live.SWAP"
         const val ACTION_REFRESH = "de.rb64.live.REFRESH"
         const val ACTION_PAST = "de.rb64.live.PAST"
@@ -74,7 +78,7 @@ class Rb64WidgetProvider : AppWidgetProvider() {
 
         private fun broadcast(ctx: Context, action: String, code: Int): PendingIntent =
             PendingIntent.getBroadcast(
-                ctx, code, Intent(ctx, Rb64WidgetProvider::class.java).setAction(action),
+                ctx, code, Intent(ctx, WidgetActions::class.java).setAction(action),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
 

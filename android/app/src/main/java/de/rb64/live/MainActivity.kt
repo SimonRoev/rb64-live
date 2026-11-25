@@ -15,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -93,10 +94,17 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         refresh(this)                       // beim Oeffnen frische Daten anfordern
+        StatusStore.fetchIfStale(this)       // Server still? Hinweis an alle direkt aus Firestore
+        // laufende Fahrt ohne Dienst (z. B. nach einem App-Update mitten in der Fahrt): Aufzeichnung wieder aufnehmen
+        de.rb64.live.ride.RideStore.init(this)
+        if (de.rb64.live.ride.RideStore.state.value != null)
+            runCatching { startForegroundService(Intent(this, de.rb64.live.ride.RideService::class.java)) }
         setContent { ThemedRoot(this) }
         if (intent?.getBooleanExtra("summary", false) == true) UiRequests.summary.value = true
         if (intent?.getBooleanExtra("review", false) == true) UiRequests.review.value = true
-        if (intent?.getBooleanExtra("checkin", false) == true) UiRequests.checkin.value = intent.getStringExtra("train")
+        // "Ich fahre mit" nur aus unserer eigenen Meldung (Geheimnis aus den Prefs) - die Activity ist exportiert
+        if (intent?.getBooleanExtra("checkin", false) == true && intent.getStringExtra("nonce") == Repo.checkinNonce(this))
+            UiRequests.checkin.value = intent.getStringExtra("train")
         else intent?.getStringExtra("train")?.let {
             UiRequests.openRel.value = intent.getStringExtra("rel")
             UiRequests.openTrain.value = it to (intent.getStringExtra("dep") ?: "")
@@ -116,7 +124,8 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra("summary", false)) UiRequests.summary.value = true
         if (intent.getBooleanExtra("review", false)) UiRequests.review.value = true
-        if (intent.getBooleanExtra("checkin", false)) UiRequests.checkin.value = intent.getStringExtra("train")
+        if (intent.getBooleanExtra("checkin", false) && intent.getStringExtra("nonce") == Repo.checkinNonce(this))
+            UiRequests.checkin.value = intent.getStringExtra("train")
         else intent.getStringExtra("train")?.let {
             UiRequests.openRel.value = intent.getStringExtra("rel")
             UiRequests.openTrain.value = it to (intent.getStringExtra("dep") ?: "")
@@ -217,7 +226,7 @@ private fun AppRoot() {
 
     // "Ich fahre mit": erst Standortberechtigung (waehrend der Nutzung), dann starten
     var pending by remember { mutableStateOf<de.rb64.live.ride.RideInfo?>(null) }
-    val askLocation = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+    val askLocation = rememberLauncherForActivityResult(de.rb64.live.ui.FineLocation()) { ok ->
         val p = pending
         if (ok && p != null) { de.rb64.live.ride.RideService.start(ctx, p); tab = TAB_RIDES }
         pending = null
@@ -246,7 +255,8 @@ private fun AppRoot() {
     // Navigation: Strecke | Abfahrten (Mitte, hervorgehoben) | Fahrten; Einstellungen ueber das Zahnrad oben
     val navTabs = listOf(TAB_LIVE, TAB_DEP, TAB_RIDES)
     Column(Modifier.fillMaxSize().background(Rb.c.background)) {
-        Box(Modifier.weight(1f)) {
+        // unten Platz fuer den runden Mittelknopf, der in den Inhalt hineinragt (sonst verdeckt er das Listenende)
+        Box(Modifier.weight(1f).padding(bottom = 18.dp)) {
             androidx.compose.runtime.CompositionLocalProvider(
                 de.rb64.live.ui.LocalOpenSettings provides (if (tab == TAB_SETTINGS) null else ::openSettings),
             ) {
@@ -290,6 +300,9 @@ private fun DeparturesScreen(
     val upcoming = rel?.let { Repo.visibleRows(it, false, now) }.orEmpty()
     val age = snap?.ageMs(now) ?: 0L
     val stale = snap?.stale(now) == true
+    // Hinweis an alle (Firestore public/status); bei veralteten Daten selbst nachsehen
+    val status = remember(tick, now / 60_000) { StatusStore.current(ctx) }
+    LaunchedEffect(stale) { if (stale) StatusStore.fetchIfStale(ctx) }
     val weekday = remember(tick) {
         java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK)
             .let { it != java.util.Calendar.SATURDAY && it != java.util.Calendar.SUNDAY }
@@ -388,12 +401,19 @@ private fun DeparturesScreen(
                 Banner("Angekommen in ${lr.info.to}" + (arr?.let { " um ${HM.format(Date(it))}" } ?: ""), kind = "info",
                     sub = "Auswertung ansehen", onClick = { UiRequests.openRide.value = lr.info.id; onOpenRide() })
             }
+            status?.let { st ->
+                item {
+                    Banner(st.text, kind = if (st.warn) "warn" else "info", sub = "Antippen zum Ausblenden",
+                        onClick = { StatusStore.dismiss(ctx, st) })
+                }
+            }
             if (snap != null && stale) item {
                 Banner("Datenstand ${HM.format(Date(snap.fresh))} (${ageText(age)})", kind = "bad",
                     sub = if (refreshing) "Frage den Server …" else "Zeiten können veraltet sein. Antippen zum Aktualisieren.",
                     onClick = { if (!refreshing) refresh(ctx) })
             }
-            snap?.notes?.let { notes -> items(notes) { Banner(it) } }
+            // Hinweise wie Wetterwarnungen stehen als Chip in der Karte des naechsten Zugs; nur ohne Zug als Banner
+            if (upcoming.isEmpty()) snap?.notes?.let { notes -> items(notes) { Banner(it) } }
             // neue App-Version auf der Webseite (nicht waehrend einer Fahrt)
             val upd = Updates.available(ctx)      // nur ein Lesen aus den Einstellungen
             if (upd != null && ride == null) item {
@@ -413,7 +433,7 @@ private fun DeparturesScreen(
                     onOpen = { sheetRow = hero }, onRide = { rel?.let { onStartRide(it, hero) } }, onStopRide = onStopRide,
                     pinned = hero.train == pinned, rideDeparted = rideDeparted,
                     vehicle = snap?.vehicleFor(hero.train, now),
-                    onTogglePin = { togglePin(hero) })
+                    onTogglePin = { togglePin(hero) }, notes = snap?.notes.orEmpty())
             }
 
             val rest = upcoming.filter { it !== hero }
@@ -467,11 +487,18 @@ private fun DeparturesScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 private fun LiveScreen(tick: Int) {
     val ctx = LocalContext.current
-    val snap = remember(tick) { Repo.load(ctx) }
+    // waehrend der eigenen Fahrt mit jeder neuen GPS-Position neu zeichnen (eigener Zug live bis zum Ziel)
+    val ride by de.rb64.live.ride.RideStore.state.collectAsState()
+    val snap = remember(tick, ride?.points?.size) { Repo.load(ctx) }
     val range = remember(tick) { Repo.liveRange(ctx) }
     var sheetTrain by remember { mutableStateOf<String?>(null) }
     var liveMapFor by remember { mutableStateOf<Pair<String, String>?>(null) }   // grosse Karte: Zug, Strecke
     var liveNotifyTick by remember { mutableIntStateOf(0) }
+    // "Bei Verspaetung melden" auf der Strecke: wie bei den Abfahrten nach der Erlaubnis fragen, wenn sie fehlt
+    val askNotifyLive = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) Settings.load(ctx).copy(enabled = true).save(ctx)
+        liveNotifyTick++
+    }
     // angetippter Zug: Detailblatt ab seinem naechsten Halt bis zum Ziel
     val st = sheetTrain
     val found = remember(st, tick) { st?.let { snap?.relForTrain(it) } }
@@ -499,6 +526,7 @@ private fun LiveScreen(tick: Int) {
                     val on = Rules.toggleTrain(ctx, rel, row)
                     Repo.prefs(ctx).edit().putBoolean("n_rules_custom", true).apply()
                     if (on && Notifier.permitted(ctx)) Settings.load(ctx).copy(enabled = true).save(ctx)
+                    else if (on) askNotifyLive.launch(Manifest.permission.POST_NOTIFICATIONS)
                     liveNotifyTick++
                 })
         }
@@ -562,7 +590,8 @@ private fun RidesScreen(ride: de.rb64.live.ride.RideState?, onGoDepartures: () -
     BackHandler(enabled = ride == null && open == null && book) { book = false }
     when {
         ride != null -> de.rb64.live.ride.RideScreen(ride)
-        open != null -> de.rb64.live.ride.SummaryScreen(open, onBack = { openId = null })
+        // je Fahrt eigener Zustand (Karte, Auswahl, Loch, Zettel) - sonst zeigt eine andere Fahrt alte Werte oder stuerzt ab
+        open != null -> androidx.compose.runtime.key(open.info.id) { de.rb64.live.ride.SummaryScreen(open, onBack = { openId = null }) }
         book -> de.rb64.live.ride.StampBookScreen(rides, onBack = { book = false })
         else -> de.rb64.live.ride.RideListScreen(rides, onOpen = { openId = it }, onGoDepartures = onGoDepartures, onOpenBook = { book = true },
             onOpenReview = { review = it })
@@ -672,7 +701,7 @@ private fun SettingsScreen(onBack: () -> Unit) {
                     }
                 }
                 Divider()
-                NavRow("Farbschema und Effekte", "Farbschema $modeName · ${vis.countOn} von ${VISUAL_OPTIONS.size} Effekten an") { sub = "visuals" }
+                NavRow("Darstellung", "Farbschema $modeName · Anzeige und Effekte") { sub = "visuals" }
             }
 
             // ------------------------------------------------ Benachrichtigungen (Untermenue)
@@ -695,7 +724,7 @@ private fun SettingsScreen(onBack: () -> Unit) {
                 de.rb64.live.ride.Fences.sync(ctx)
             }
             val askBackground = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> setFence(ok) }
-            val askFine = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+            val askFine = rememberLauncherForActivityResult(de.rb64.live.ui.FineLocation()) { ok ->
                 if (ok) askBackground.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) else setFence(false)
             }
             RbCard(padding = Dim.s8) {
@@ -715,6 +744,14 @@ private fun SettingsScreen(onBack: () -> Unit) {
                         ctx.checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED ->
                             askBackground.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
                         else -> setFence(true)
+                    }
+                }
+                if (fenceOn) {
+                    var autoOn by remember { mutableStateOf(de.rb64.live.ride.Fences.autoRide(ctx)) }
+                    ToggleRow("Angehefteten Zug automatisch aufzeichnen",
+                        "Bist du am Bahnhof und dein angehefteter Zug fährt in den nächsten 20 Minuten, startet die Aufzeichnung " +
+                            "von selbst – statt des Vorschlags. Steigst du nicht ein, wird sie verworfen.", autoOn) { on ->
+                        autoOn = on; de.rb64.live.ride.Fences.setAutoRide(ctx, on)
                     }
                 }
             }
@@ -899,15 +936,24 @@ private fun VisualsScreen(onBack: () -> Unit) {
             }
             Text("Das Widget folgt immer dem Farbschema des Systems.", style = Ts.small, color = Rb.c.muted)
 
+            // Anzeige (welche Infos zu sehen sind) getrennt von reiner Dekoration - "Alle aus" soll keine Infos abschalten
+            val decor = setOf("shadows", "color_header", "daytime_header", "animations")
+            SectionHeader("Anzeige")
+            RbCard(padding = Dim.s8) {
+                VISUAL_OPTIONS.filter { it.first !in decor }.forEach { (k, title, sub) ->
+                    ToggleRow(title, sub, vis.on(k)) { on -> Repo.setVisual(ctx, k, on); reload() }
+                }
+            }
             SectionHeader("Effekte")
+            val decorOn = decor.count { vis.on(it) }
             Row(horizontalArrangement = Arrangement.spacedBy(Dim.s8)) {
-                RbButton("Alle an", { Repo.setAllVisuals(ctx, true); reload() }, Modifier.weight(1f), primary = false,
-                    enabled = vis.countOn < VISUAL_OPTIONS.size)
-                RbButton("Alle aus", { Repo.setAllVisuals(ctx, false); reload() }, Modifier.weight(1f), primary = false,
-                    enabled = vis.countOn > 0)
+                RbButton("Alle an", { decor.forEach { Repo.setVisual(ctx, it, true) }; reload() }, Modifier.weight(1f), primary = false,
+                    enabled = decorOn < decor.size)
+                RbButton("Alle aus", { decor.forEach { Repo.setVisual(ctx, it, false) }; reload() }, Modifier.weight(1f), primary = false,
+                    enabled = decorOn > 0)
             }
             RbCard(padding = Dim.s8) {
-                VISUAL_OPTIONS.forEach { (k, title, sub) ->
+                VISUAL_OPTIONS.filter { it.first in decor }.forEach { (k, title, sub) ->
                     ToggleRow(title, sub, vis.on(k)) { on -> Repo.setVisual(ctx, k, on); reload() }
                 }
             }
@@ -955,14 +1001,16 @@ internal fun TimeChip(label: String, minutes: Int, enabled: Boolean, onClick: ()
 @Composable
 private fun ToggleRow(title: String, sub: String?, value: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = Dim.touch).clip(RoundedCornerShape(Dim.rButton))
-        .clickable(enabled = enabled, role = Role.Switch) { onChange(!value) }.padding(horizontal = Dim.s8, vertical = Dim.s8),
+        // ganze Zeile ist der Schalter (TalkBack: ein Element mit Zustand an/aus statt zwei)
+        .toggleable(value = value, enabled = enabled, role = Role.Switch, onValueChange = onChange)
+        .padding(horizontal = Dim.s8, vertical = Dim.s8),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, style = Ts.text, color = if (enabled) Rb.c.onSurface else Rb.c.muted)
             if (sub != null) Text(sub, style = Ts.small, color = Rb.c.muted)
         }
         Spacer(Modifier.width(Dim.s8))
-        Switch(checked = value, onCheckedChange = onChange, enabled = enabled)
+        Switch(checked = value, onCheckedChange = null, enabled = enabled)
     }
 }
 
